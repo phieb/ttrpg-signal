@@ -3,7 +3,7 @@
 Signal-Bot der als Dungeon Master via Claude API antwortet. Spieler schreiben in eine Signal-Gruppe (oder 1:1), der Bot antwortet als DM.
 
 > **Spielwelt-Daten:** Engine, Templates und Abenteuer-Struktur liegen in einem separaten Repo:
-> [phieb/ttrpg](https://github.com/phieb/ttrpg) — wird als NFS-Mount unter `TTRPG_PATH` eingebunden.
+> [phieb/ttrpg](https://github.com/phieb/ttrpg) — wird über `TTRPG_PATH` eingebunden (z.B. als NFS-Mount oder lokaler Ordner).
 
 ## Stack
 
@@ -11,17 +11,25 @@ Signal-Bot der als Dungeon Master via Claude API antwortet. Spieler schreiben in
 - **Python 3.11** — Bot-Service
 - **Claude API** (`claude-haiku-4-5`) — DM-Logik mit Prompt Caching
 - **Vertex AI Imagen 4** — Charakter-Portrait-Generierung
-- **Docker** — läuft auf Various (Alpine Linux)
-- **NFS** — TTRPG-Daten vom NAS gemountet
+- **Docker** — containerisiert
 
 ---
 
 ## Setup
 
-### 1. signal-cli starten
+### 1. Repos klonen
 
 ```bash
-cd ~/docker/ttrpg-signal
+git clone https://github.com/phieb/ttrpg-signal.git
+git clone https://github.com/phieb/ttrpg.git
+```
+
+Die `docker-compose.yml` liegt im ttrpg-signal Repo. Du kannst sie direkt dort oder in einem separaten Deployment-Ordner betreiben — passe die Pfade in `docker-compose.yml` entsprechend an.
+
+### 2. signal-cli starten und registrieren
+
+```bash
+cd /pfad/zu/ttrpg-signal
 docker compose up -d signal-cli
 ```
 
@@ -33,7 +41,7 @@ curl -s "http://localhost:8085/v1/qrcodelink?device_name=ttrpg-bot" -o qrcode.pn
 
 PNG öffnen → Signal → Einstellungen → Verknüpfte Geräte → Gerät hinzufügen → scannen.
 
-### 2. `.env` befüllen
+### 3. `.env` befüllen
 
 ```bash
 cp .env.example .env
@@ -43,26 +51,16 @@ cp .env.example .env
 ANTHROPIC_API_KEY=sk-ant-...
 SIGNAL_PHONE_NUMBER=+43...      # Bot-Nummer (linked device)
 ADMIN_PHONE_NUMBER=+43...       # Wer !kommandos schicken darf
-TTRPG_PATH=/mnt/ttrpg
-MAX_CONTEXT_TOKENS=3000
-HISTORY_MESSAGES=6
-RESPONSE_DELAY_SECONDS=2
-GCP_PROJECT=...                 # GCP Projekt-ID für Vertex AI
+TTRPG_PATH=/pfad/zu/ttrpg      # Wo das ttrpg-Repo liegt (lokal oder NFS-Mount)
+GCP_PROJECT=...                 # GCP Projekt-ID für Vertex AI (Avatar-Generierung)
 GCP_LOCATION=us-central1
-RATE_LIMIT_MESSAGES=5
-RATE_LIMIT_WINDOW=60
-BATCH_WINDOW_SECONDS=60
-MAX_LOG_LINES=500
 ```
 
-Alle Variablen mit Beschreibung: siehe `.env.example`.
+Alle Variablen mit Beschreibung und Defaults: siehe `.env.example`.
 
-### 3. GCP Service Account (für Avatar-Generierung)
+### 4. GCP Service Account (für Avatar-Generierung)
 
 ```bash
-export PATH="/opt/google-cloud-sdk/bin:$PATH"
-gcloud auth login
-
 gcloud iam service-accounts create ttrpg-bot \
   --display-name="TTRPG Bot" --project=PROJEKT_ID
 
@@ -74,22 +72,54 @@ gcloud iam service-accounts keys create gcp-sa.json \
   --iam-account="ttrpg-bot@PROJEKT_ID.iam.gserviceaccount.com"
 ```
 
-`gcp-sa.json` liegt im Projektordner (in `.gitignore`, nie ins Git!).
+`gcp-sa.json` im Projektordner ablegen (in `.gitignore`, nie ins Git!).
 
-### 4. Spieler anlegen
+### 5. Spielwelt vorbereiten
 
-```yaml
-# /mnt/coding/ttrpg/players/spieler.yaml
-spieler:
-  name: "Name"
-  telefon: "+43..."
-  rolle: spieler
-```
-
-### 5. Bot starten
+Im ttrpg-Repo `status.yaml` aus der Vorlage anlegen:
 
 ```bash
-cd ~/docker/ttrpg-signal
+cp /pfad/zu/ttrpg/status.example.yaml /pfad/zu/ttrpg/status.yaml
+```
+
+Spieler werden danach per `!invite` direkt über den Bot registriert.
+
+### 6. `docker-compose.yml` anlegen
+
+```yaml
+services:
+
+  signal-cli:
+    image: bbernhard/signal-cli-rest-api:latest
+    container_name: signal-cli
+    restart: unless-stopped
+    environment:
+      - MODE=native
+    ports:
+      - "8085:8080"
+    volumes:
+      - ./signal-cli-data:/home/.local/share/signal-cli
+
+  ttrpg-bot:
+    build: /pfad/zu/ttrpg-signal
+    container_name: ttrpg-bot
+    restart: unless-stopped
+    depends_on:
+      - signal-cli
+    env_file:
+      - /pfad/zu/ttrpg-signal/.env
+    volumes:
+      - /pfad/zu/ttrpg:/mnt/ttrpg          # ttrpg-Repo → im Container immer /mnt/ttrpg
+      - /pfad/zu/gcp-sa.json:/app/gcp-sa.json:ro
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-sa.json
+```
+
+> `TTRPG_PATH` in der `.env` muss auf den Container-Pfad zeigen, also `/mnt/ttrpg`.
+
+### 7. Bot starten
+
+```bash
 docker compose up -d
 ```
 
@@ -144,10 +174,9 @@ Der Bot finalisiert Session 0 automatisch sobald alle Charakterblätter vollstä
 ## Dateistruktur
 
 ```
-/mnt/coding/ttrpg-signal/     ← Bot-Code
+ttrpg-signal/                  ← dieses Repo (Bot-Code)
 ├── Dockerfile
-├── docker-compose.yml         ← liegt in ~/docker/ttrpg-signal/
-├── requirements.txt
+├── docker-compose.yml
 ├── .env                       ← nie ins Git!
 ├── gcp-sa.json                ← nie ins Git!
 └── bot/
@@ -158,37 +187,41 @@ Der Bot finalisiert Session 0 automatisch sobald alle Charakterblätter vollstä
     ├── generate_avatar.py     ← Vertex AI Imagen
     └── config.py
 
-/mnt/coding/ttrpg/            ← TTRPG Engine + Daten (NFS vom NAS)
-├── status.yaml               ← Abenteuer-Übersicht + Signal-Gruppen
-├── players/                  ← Spieler-Verzeichnis
-│   ├── phieb.yaml
-│   └── markus.yaml
+ttrpg/                         ← separates Repo, eingebunden via TTRPG_PATH
+├── status.yaml                ← Abenteuer-Übersicht + Signal-Gruppen
+├── status.example.yaml        ← Vorlage
+├── players/                   ← ein YAML pro Spieler (Telefonnummer etc.)
 ├── _engine/
-│   └── DUNGEON_MASTER.md     ← System-Prompt für Claude
+│   ├── DUNGEON_MASTER.md      ← System-Prompt für Claude
+│   └── templates/             ← YAML-Vorlagen für neue Abenteuer
 └── adventures/
-    └── mein_abenteuer/
+    └── mein-abenteuer/
         ├── session.yaml
         ├── setting.yaml
         ├── npcs.yaml
         ├── spielprotokoll.jsonl   ← Crash-sicheres Log (wird bei !pause geleert)
         └── characters/
             ├── held.yaml
-            └── held_portrait_prompt.txt
+            └── held_avatar.png
 ```
+
+---
 
 ## Persistenz
 
 | Was | Wo | Wann |
-|-----|----|----|
+|-----|----|------|
 | Jede Nachricht | `spielprotokoll.jsonl` | sofort (append) |
 | History bei Neustart | aus `spielprotokoll.jsonl` | beim ersten Zugriff |
 | Spielstand/Zusammenfassung | `session.yaml` | bei `!pause` (Claude komprimiert) |
 | JSONL | geleert | bei `!pause` |
 
+---
+
 ## Bot neu bauen (nach Code-Änderungen)
 
 ```bash
-cd ~/docker/ttrpg-signal
+cd /pfad/zu/ttrpg-signal
 docker compose build ttrpg-bot
 docker compose up -d ttrpg-bot
 ```
