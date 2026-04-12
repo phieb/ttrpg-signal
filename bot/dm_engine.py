@@ -56,6 +56,11 @@ def _build_system(adventure_folder: str) -> list:
                 "und sind unten als 'Aktueller Spielstand' eingebettet. "
                 "Erwähne niemals Dateien oder fehlenden Zugriff. "
                 "Steige direkt als DM in die Szene ein.\n\n"
+                "FORMATIERUNG: Du schreibst in Signal. Verwende ausschließlich Signal-Formatierung:\n"
+                "- *fett* für wichtige Begriffe, Ortsnamen, NSC-Namen\n"
+                "- _kursiv_ für atmosphärische Beschreibungen, Gedanken, Flüstern\n"
+                "- Keine Markdown-Header (##), keine HTML\n"
+                "- Emojis sparsam einsetzen, nur wenn sie zur Atmosphäre passen\n\n"
                 f"## Aktueller Spielstand\n\n{context}"
             ),
         },

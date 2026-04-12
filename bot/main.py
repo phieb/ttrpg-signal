@@ -68,7 +68,7 @@ def cmd_status(adventure_folder: str, **_) -> str:
     ort = session.get("aktueller_ort") or session.get("aktuelle_szene", {}).get("ort", "?")
     szene = session.get("letzte_szene") or session.get("aktuelle_szene", {}).get("zusammenfassung", "—")
     quests = [q["name"] for q in session.get("aktive_quests", []) if q.get("status") != "abgeschlossen"]
-    lines = [f"📍 {ort}", f"📖 {szene}"]
+    lines = [f"📍 *{ort}*", f"_{szene}_"]
     if quests:
         lines.append("🎯 " + " | ".join(quests))
     return "\n".join(lines)
@@ -161,13 +161,13 @@ def cmd_charakter(sender: str, adventure_folder: str, players: dict, **_) -> str
 
     lines = [
         f"🎭 *{c.get('name', '?')}*",
-        ident.get("wer_bist_du", ""),
+        f"_{ident.get('wer_bist_du', '')}_",
         f"Aussehen: {ident.get('aussehen', '—')}",
         "",
-        "Skills: " + ", ".join(s["name"] for s in skills),
+        "*Skills:* " + ", ".join(s["name"] for s in skills),
         "",
-        f"Will: {mot.get('will', '—')}",
-        f"Fürchtet: {mot.get('fuerchtet', '—')}",
+        f"*Will:* {mot.get('will', '—')}",
+        f"*Fürchtet:* {mot.get('fuerchtet', '—')}",
     ]
     return "\n".join(lines)
 
