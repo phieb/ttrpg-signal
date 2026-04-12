@@ -21,7 +21,7 @@ TTRPG_PATH = os.getenv("TTRPG_PATH", "/mnt/ttrpg")
 
 # Bot Verhalten
 MAX_CONTEXT_TOKENS = int(os.getenv("MAX_CONTEXT_TOKENS", "3000"))
-HISTORY_MESSAGES = int(os.getenv("HISTORY_MESSAGES", "10"))
+HISTORY_MESSAGES = int(os.getenv("HISTORY_MESSAGES", "6"))
 RESPONSE_DELAY_SECONDS = float(os.getenv("RESPONSE_DELAY_SECONDS", "2"))
 
 # Rate Limiting (pro Absender)

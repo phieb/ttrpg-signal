@@ -36,31 +36,44 @@ def _load_dm_prompt() -> str:
 
 
 def _build_system(adventure_folder: str) -> list:
-    """Baut die system-Blöcke auf — DM-Prompt gecacht, Kontext frisch."""
+    """Baut die system-Blöcke auf — DM-Prompt + statische Anweisungen gecacht, Kontext frisch."""
     dm_prompt = _load_dm_prompt()
     context = session_manager.build_context(adventure_folder)
+
+    static_instructions = (
+        "\n\n---\n\n"
+        "## WICHTIG — Technischer Kontext\n\n"
+        "Du läufst als Signal-Bot. Du hast KEINEN direkten Dateizugriff. "
+        "Alle relevanten Spieldaten wurden bereits aus den YAML-Dateien geladen "
+        "und sind unten als 'Aktueller Spielstand' eingebettet. "
+        "Erwähne niemals Dateien oder fehlenden Zugriff. "
+        "Steige direkt als DM in die Szene ein.\n\n"
+        "FORMATIERUNG: Du schreibst in Signal (text_mode=styled). Verwende ausschließlich:\n"
+        "- **fett** für wichtige Begriffe, Ortsnamen, NSC-Namen\n"
+        "- *kursiv* für atmosphärische Beschreibungen, Gedanken, Flüstern\n"
+        "- Keine Markdown-Header (##), keine HTML, kein Underscore-Italic\n"
+        "- Emojis sparsam einsetzen, nur wenn sie zur Atmosphäre passen"
+    )
 
     return [
         {
             "type": "text",
-            "text": dm_prompt,
-            "cache_control": {"type": "ephemeral"},  # Prompt Caching
+            # DM-Prompt + statische Anweisungen zusammen cachen — maximiert den gecachten Block
+            # (Haiku benötigt ≥2048 Tokens; kombiniert deutlich über der Schwelle)
+            "text": dm_prompt + static_instructions,
+            "cache_control": {"type": "ephemeral"},
         },
         {
             "type": "text",
+            # Nur der dynamische Spielstand bleibt uncached (ändert sich jede Runde).
+            # Die ERINNERUNG steht hier damit sie auch in langen Sessions "frisch" bleibt
+            # und nicht im gecachten Block vergraben wird.
             "text": (
-                "\n\n---\n\n"
-                "## WICHTIG — Technischer Kontext\n\n"
-                "Du läufst als Signal-Bot. Du hast KEINEN direkten Dateizugriff. "
-                "Alle relevanten Spieldaten wurden bereits aus den YAML-Dateien geladen "
-                "und sind unten als 'Aktueller Spielstand' eingebettet. "
-                "Erwähne niemals Dateien oder fehlenden Zugriff. "
-                "Steige direkt als DM in die Szene ein.\n\n"
-                "FORMATIERUNG: Du schreibst in Signal (text_mode=styled). Verwende ausschließlich:\n"
-                "- **fett** für wichtige Begriffe, Ortsnamen, NSC-Namen\n"
-                "- *kursiv* für atmosphärische Beschreibungen, Gedanken, Flüstern\n"
-                "- Keine Markdown-Header (##), keine HTML, kein Underscore-Italic\n"
-                "- Emojis sparsam einsetzen, nur wenn sie zur Atmosphäre passen\n\n"
+                "\n\n⚠️ ERINNERUNG (gilt die gesamte Session):\n"
+                "Du spielst NIEMALS Spielercharaktere. "
+                "Kein Spielercharakter handelt, spricht oder entscheidet in deinem Text — "
+                "nur die Welt, NSCs und Atmosphäre. "
+                "Jede Antwort endet mit einer offenen Frage an die Gruppe.\n\n"
                 f"## Aktueller Spielstand\n\n{context}"
             ),
         },
