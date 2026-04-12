@@ -273,8 +273,9 @@ def cmd_usage(**_) -> str:
     return usage_tracker.get_summary()
 
 
-def cmd_zeigmal(adventure_folder: str, reply_to: str, **_) -> None:
-    generate_avatar.generate_scene_image(adventure_folder, reply_to)
+def cmd_zeigmal(adventure_folder: str, reply_to: str, args: list, **_) -> None:
+    hint = " ".join(args) if args else ""
+    generate_avatar.generate_scene_image(adventure_folder, reply_to, hint=hint)
 
 
 def cmd_pause(adventure_folder: str, **_) -> str:
@@ -586,7 +587,7 @@ def cmd_help(sender: str, **_) -> str:
             "!spiele — alle Abenteuer anzeigen",
             "!spiel <name> — Zusammenfassung eines Abenteuers",
             "!usage — API-Nutzung & geschätzte Kosten anzeigen",
-            "!zeigmal — atmosphärisches Szenen-Bild generieren & schicken",
+            "!zeigmal [Idee] — atmosphärisches Szenen-Bild generieren & schicken",
         ]
 
     return "\n".join(lines)

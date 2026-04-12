@@ -127,11 +127,12 @@ def generate_and_send_avatars(adventure_folder: str, reply_to: str,
 
 # ── Szenen-Bild (!zeigmal) ────────────────────────────────────────────────────
 
-def _build_scene_imagen_prompt(adventure_folder: str) -> str | None:
+def _build_scene_imagen_prompt(adventure_folder: str, hint: str = "") -> str | None:
     """
     Fragt Claude nach einem englischen Imagen-Prompt für die aktuelle Szene.
     Bezieht Ort, Szenenbeschreibung, Setting-Atmosphäre und Charakteraussehen ein.
     Nur Charaktere mit vorhandenem Avatar werden erwähnt.
+    hint: optionaler Wunsch des Spielers (z.B. "Koral in seiner Werkstatt mit uns beiden")
     """
     session = session_manager.load_session(adventure_folder)
     setting = session_manager.load_setting(adventure_folder)
@@ -175,15 +176,23 @@ def _build_scene_imagen_prompt(adventure_folder: str) -> str | None:
         kontext_parts.append("Recent events: " + " | ".join(ereignisse))
     if char_descriptions:
         kontext_parts.append("Characters present:\n" + "\n".join(char_descriptions))
+    if hint:
+        kontext_parts.append(f"Player's scene suggestion: {hint}")
 
     if not kontext_parts:
         return None
+
+    hint_instruction = (
+        "The player has given a scene suggestion — treat it as inspiration, "
+        "incorporate it if it fits, adjust freely to serve the mood. "
+    ) if hint else ""
 
     prompt = (
         "You are writing a prompt for an AI image generator (Imagen 4). "
         "Based on the TTRPG scene below, write a single detailed English image prompt. "
         "The image should be atmospheric, cinematic, wide-angle (16:9). "
         "Include the characters in the scene if their appearance is described. "
+        f"{hint_instruction}"
         "Focus on mood, lighting, environment, and visual storytelling. "
         "Return ONLY the image prompt — no explanation, no quotes.\n\n"
         + "\n".join(kontext_parts)
@@ -206,13 +215,14 @@ def _build_scene_imagen_prompt(adventure_folder: str) -> str | None:
         return None
 
 
-def generate_scene_image(adventure_folder: str, reply_to: str) -> None:
+def generate_scene_image(adventure_folder: str, reply_to: str, hint: str = "") -> None:
     """
-    !zeigmal — generiert ein atmosphärisches 16:9-Szenenbild und schickt es in die Gruppe.
+    !zeigmal [hint] — generiert ein atmosphärisches 16:9-Szenenbild und schickt es in die Gruppe.
+    hint: optionaler Spieler-Wunsch, der als Inspiration in den Prompt einfließt.
     """
     signal_client.send(reply_to, "🎨 Generiere Szenen-Bild... einen Moment!")
 
-    imagen_prompt = _build_scene_imagen_prompt(adventure_folder)
+    imagen_prompt = _build_scene_imagen_prompt(adventure_folder, hint=hint)
     if not imagen_prompt:
         signal_client.send(reply_to, "⚠️ Keine Szenen-Informationen verfügbar.")
         return
