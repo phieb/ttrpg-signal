@@ -7,12 +7,12 @@ und schickt es als Signal-Attachment in die Gruppe.
 import logging
 from pathlib import Path
 
-from google import genai
-from google.genai import types
+import vertexai
+from vertexai.preview.vision_models import ImageGenerationModel
 
 import session_manager
 import signal_client
-from config import GOOGLE_API_KEY, TTRPG_PATH
+from config import GCP_PROJECT, GCP_LOCATION, TTRPG_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -62,25 +62,15 @@ def generate_avatar(adventure_folder: str, char_name: str) -> Path | None:
     )
 
     try:
-        client = genai.Client(api_key=GOOGLE_API_KEY)
-        response = client.models.generate_images(
-            model=IMAGEN_MODEL,
-            prompt=prompt,
-            config=types.GenerateImagesConfig(
-                number_of_images=1,
-                aspect_ratio="1:1",
-                safety_filter_level="block_low_and_above",
-                person_generation="allow_adult",
-            ),
-        )
-
-        image_bytes = response.generated_images[0].image.image_bytes
-        output_path.write_bytes(image_bytes)
+        vertexai.init(project=GCP_PROJECT, location=GCP_LOCATION)
+        model = ImageGenerationModel.from_pretrained(IMAGEN_MODEL)
+        images = model.generate_images(prompt=prompt, number_of_images=1, aspect_ratio="1:1")
+        images[0].save(str(output_path))
         logger.info(f"Avatar generiert: {output_path}")
         return output_path
 
     except Exception as e:
-        logger.error(f"Imagen-Fehler für {char_name}: {e}")
+        logger.error(f"Vertex AI Fehler für {char_name}: {e}")
         return None
 
 
