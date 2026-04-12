@@ -1,5 +1,6 @@
 import time
 import logging
+import shutil
 import signal
 import yaml
 from pathlib import Path
@@ -7,7 +8,7 @@ from pathlib import Path
 import signal_client
 import session_manager
 import dm_engine
-from config import SIGNAL_PHONE_NUMBER, TTRPG_PATH, RESPONSE_DELAY_SECONDS
+from config import SIGNAL_PHONE_NUMBER, ADMIN_PHONE_NUMBER, TTRPG_PATH, RESPONSE_DELAY_SECONDS
 
 logging.basicConfig(
     level=logging.INFO,
@@ -17,8 +18,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 3
-
-running = True
+TTRPG = Path(TTRPG_PATH)
 
 
 def handle_signal(sig, frame):
@@ -27,46 +27,181 @@ def handle_signal(sig, frame):
     running = False
 
 
+running = True
+
+
+# ── Hilfsfunktionen ──────────────────────────────────────────────────────────
+
 def load_registered_groups() -> set:
-    status_path = Path(TTRPG_PATH) / "status.yaml"
     try:
-        data = yaml.safe_load(status_path.read_text())
-        return {
-            a["signal_gruppe"]
-            for a in data.get("abenteuer", [])
-            if a.get("signal_gruppe")
-        }
+        data = yaml.safe_load((TTRPG / "status.yaml").read_text())
+        return {a["signal_gruppe"] for a in data.get("abenteuer", []) if a.get("signal_gruppe")}
     except Exception as e:
         logger.warning(f"status.yaml konnte nicht geladen werden: {e}")
         return set()
 
 
-def handle_command(cmd: str, sender: str, adventure_folder: str) -> str | None:
-    """
-    Verarbeitet !kommandos vom DM (castle assistant).
-    Gibt eine Antwort-Nachricht zurück oder None.
-    """
-    if cmd == "!pause":
-        dm_engine.compress_session(adventure_folder)
-        dm_engine.clear_history(adventure_folder)
-        return "⏸ Spielstand gespeichert und komprimiert. Bis zum nächsten Mal!"
-
-    if cmd == "!status":
-        session = session_manager.load_session(adventure_folder)
-        szene = session.get("aktuelle_szene", {})
-        return (
-            f"📍 Ort: {szene.get('ort', '?')}\n"
-            f"📖 {session.get('story_so_far', '—')}"
-        )
-
+def find_player_phone(name: str) -> str | None:
+    """Gibt die Telefonnummer eines Spielers anhand seines Namens zurück."""
+    for f in (TTRPG / "players").glob("*.yaml"):
+        try:
+            data = yaml.safe_load(f.read_text())
+            s = data.get("spieler", {})
+            if s.get("name", "").lower() == name.lower():
+                return s["telefon"]
+        except Exception:
+            pass
     return None
 
 
-def process_message(
-    msg: dict,
-    players: dict,
-    registered_groups: set,
-):
+# ── Kommandos ─────────────────────────────────────────────────────────────────
+
+def cmd_pause(adventure_folder: str, **_) -> str:
+    dm_engine.compress_session(adventure_folder)
+    dm_engine.clear_history(adventure_folder)
+    return "⏸ Spielstand gespeichert. Bis zum nächsten Mal!"
+
+
+def cmd_status(adventure_folder: str, **_) -> str:
+    session = session_manager.load_session(adventure_folder)
+    ort = session.get("aktueller_ort") or session.get("aktuelle_szene", {}).get("ort", "?")
+    szene = session.get("letzte_szene") or session.get("aktuelle_szene", {}).get("zusammenfassung", "—")
+    quests = [q["name"] for q in session.get("aktive_quests", []) if q.get("status") != "abgeschlossen"]
+    lines = [f"📍 {ort}", f"📖 {szene}"]
+    if quests:
+        lines.append("🎯 " + " | ".join(quests))
+    return "\n".join(lines)
+
+
+def cmd_neu(args: list, reply_to: str, **_) -> str:
+    if not args:
+        return "Usage: !neu [abenteuer-name]"
+
+    name = " ".join(args)
+    ordner = name.lower().replace(" ", "_")
+    adventure_path = TTRPG / "adventures" / ordner
+
+    if adventure_path.exists():
+        return f"❌ Ordner '{ordner}' existiert bereits."
+
+    # Ordnerstruktur aus Template kopieren
+    template = TTRPG / "adventures" / "_template"
+    if template.exists():
+        shutil.copytree(template, adventure_path)
+    else:
+        (adventure_path / "characters").mkdir(parents=True)
+        for f in ["session.yaml", "setting.yaml", "npcs.yaml"]:
+            (adventure_path / f).write_text("")
+
+    # status.yaml updaten
+    status_path = TTRPG / "status.yaml"
+    data = yaml.safe_load(status_path.read_text()) or {}
+    data.setdefault("abenteuer", []).append({
+        "ordner": ordner,
+        "name": name,
+        "status": "session_0",
+        "letzte_szene": "",
+        "zuletzt_gespielt": "",
+        "signal_gruppe": "",
+        "spieler": [],
+    })
+    status_path.write_text(yaml.dump(data, allow_unicode=True, default_flow_style=False))
+
+    logger.info(f"Neues Abenteuer erstellt: {ordner}")
+    return f"✅ Abenteuer '{name}' erstellt. Ordner: {ordner}\nJetzt Signal-Gruppe anlegen und ID in status.yaml eintragen."
+
+
+def cmd_session0(adventure_folder: str, reply_to: str, **_) -> str:
+    """Startet Session 0 — DM begrüßt die Gruppe."""
+    session = session_manager.load_session(adventure_folder)
+    session["status"] = "session_0"
+    session_manager.save_session(adventure_folder, session)
+    dm_engine.clear_history(adventure_folder)
+
+    # DM Session-0-Eröffnung generieren
+    intro = dm_engine.respond(adventure_folder, "System", "Starte Session 0. Begrüße die Spieler und führe durch die Charaktererstellung.")
+    signal_client.send(reply_to, intro)
+    return None  # DM hat bereits geantwortet
+
+
+def cmd_dm(args: list, **_) -> str:
+    """!dm @Spieler [nachricht] — geheime 1:1 Nachricht an einen Spieler."""
+    if len(args) < 2:
+        return "Usage: !dm @Spieler [nachricht]"
+
+    spieler_name = args[0].lstrip("@")
+    nachricht = " ".join(args[1:])
+
+    telefon = find_player_phone(spieler_name)
+    if not telefon:
+        return f"❌ Spieler '{spieler_name}' nicht gefunden."
+
+    signal_client.send(telefon, f"📨 Geheime DM-Nachricht:\n{nachricht}")
+    return f"✅ Nachricht an {spieler_name} gesendet."
+
+
+def cmd_charakter(sender: str, adventure_folder: str, players: dict, **_) -> str:
+    """Zeigt das Charakterblatt des Absenders."""
+    player_name = signal_client.get_sender_name(sender, players)
+    char = session_manager.get_character_for_player(adventure_folder, player_name)
+    if not char:
+        return f"❌ Kein Charakter für {player_name} in diesem Abenteuer gefunden."
+
+    c = char.get("charakter", {})
+    ident = char.get("identitaet", {})
+    skills = char.get("skills", [])
+    mot = char.get("motivation", {})
+
+    lines = [
+        f"🎭 *{c.get('name', '?')}*",
+        ident.get("wer_bist_du", ""),
+        f"Aussehen: {ident.get('aussehen', '—')}",
+        "",
+        "Skills: " + ", ".join(s["name"] for s in skills),
+        "",
+        f"Will: {mot.get('will', '—')}",
+        f"Fürchtet: {mot.get('fuerchtet', '—')}",
+    ]
+    return "\n".join(lines)
+
+
+# ── Kommando-Router ───────────────────────────────────────────────────────────
+
+COMMANDS = {
+    "!pause":     cmd_pause,
+    "!status":    cmd_status,
+    "!neu":       cmd_neu,
+    "!session0":  cmd_session0,
+    "!dm":        cmd_dm,
+    "!charakter": cmd_charakter,
+}
+
+
+def handle_command(text: str, sender: str, adventure_folder: str | None,
+                   reply_to: str, players: dict) -> str | None:
+    parts = text.split()
+    cmd = parts[0].lower()
+    args = parts[1:]
+
+    handler = COMMANDS.get(cmd)
+    if not handler:
+        return f"❓ Unbekanntes Kommando: {cmd}"
+
+    if cmd in ("!pause", "!status", "!session0", "!charakter") and not adventure_folder:
+        return "❌ Kein aktives Abenteuer gefunden."
+
+    return handler(
+        args=args,
+        sender=sender,
+        adventure_folder=adventure_folder,
+        reply_to=reply_to,
+        players=players,
+    )
+
+
+# ── Message Processing ────────────────────────────────────────────────────────
+
+def process_message(msg: dict, players: dict, registered_groups: set):
     sender = msg["sender"]
     text = msg["text"].strip()
     group_id = msg["group_id"]
@@ -76,7 +211,7 @@ def process_message(
     if sender == SIGNAL_PHONE_NUMBER:
         return
 
-    # Abenteuer bestimmen
+    # Abenteuer und Reply-Ziel bestimmen
     if group_id:
         if group_id not in registered_groups:
             logger.debug(f"Gruppe {group_id} nicht registriert — ignoriert")
@@ -87,17 +222,21 @@ def process_message(
         adventure_folder = session_manager.get_adventure_for_player(sender)
         reply_to = sender
 
-    if not adventure_folder:
-        logger.warning(f"Kein Abenteuer für {sender_name} ({sender}) gefunden")
-        return
+    logger.info(f"[{adventure_folder or '?'}] {sender_name}: {text}")
 
-    logger.info(f"[{adventure_folder}] {sender_name}: {text}")
-
-    # !Kommandos (nur vom castle assistant / DM)
-    if text.startswith("!") and sender == SIGNAL_PHONE_NUMBER:
-        response = handle_command(text.lower(), sender, adventure_folder)
+    # !Kommandos — nur vom Admin
+    if text.startswith("!"):
+        if sender != ADMIN_PHONE_NUMBER:
+            logger.warning(f"Kommando von unbekannter Nummer ignoriert: {sender}")
+            return
+        response = handle_command(text, sender, adventure_folder, reply_to, players)
         if response:
             signal_client.send(reply_to, response)
+        return
+
+    # Kein Abenteuer → ignorieren
+    if not adventure_folder:
+        logger.warning(f"Kein Abenteuer für {sender_name} ({sender}) — ignoriert")
         return
 
     # DM antworten lassen
@@ -105,6 +244,8 @@ def process_message(
     dm_reply = dm_engine.respond(adventure_folder, sender_name, text)
     signal_client.send(reply_to, dm_reply)
 
+
+# ── Main Loop ─────────────────────────────────────────────────────────────────
 
 def main():
     signal.signal(signal.SIGTERM, handle_signal)

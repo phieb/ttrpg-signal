@@ -9,6 +9,7 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 # Signal
 SIGNAL_CLI_URL = os.getenv("SIGNAL_CLI_URL", "http://signal-cli:8080")
 SIGNAL_PHONE_NUMBER = os.getenv("SIGNAL_PHONE_NUMBER", "")
+ADMIN_PHONE_NUMBER = os.getenv("ADMIN_PHONE_NUMBER", "")  # darf !kommandos schicken
 
 # NAS
 TTRPG_PATH = os.getenv("TTRPG_PATH", "/mnt/ttrpg")
