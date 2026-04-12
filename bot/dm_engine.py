@@ -188,55 +188,88 @@ def respond(adventure_folder: str, sender_name: str, message: str) -> str:
         return "*(Der DM räuspert sich — kurze Pause, gleich weiter.)*"
 
 
+def _load_session_text_from_log(adventure_folder: str) -> str:
+    """Liest den JSONL-Log und gibt die Konversation als lesbaren Text zurück."""
+    log_path = TTRPG / "adventures" / adventure_folder / "spielprotokoll.jsonl"
+    if not log_path.exists():
+        return ""
+    lines = []
+    try:
+        with log_path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                entry = json.loads(line)
+                if entry["role"] == "user":
+                    lines.append(f"SPIELER: {entry['content'] if 'content' in entry else entry.get('text', '')}")
+                elif entry["role"] == "assistant":
+                    lines.append(f"DM: {entry.get('text', '')}")
+    except Exception as e:
+        logger.warning(f"Log-Lesen fehlgeschlagen: {e}")
+    return "\n\n".join(lines)
+
+
 def compress_session(adventure_folder: str) -> None:
     """
-    Komprimiert session.yaml — neuere Einträge detailliert, ältere komprimiert.
-    Wird bei !pause aufgerufen.
+    Komprimiert session.yaml bei !pause.
+    Nutzt JSONL-Inhalt als Quelle wenn letzte_ereignisse leer ist.
     """
     session = session_manager.load_session(adventure_folder)
-
     letzte = session.get("letzte_ereignisse", [])
     history = session.get("history", [])
 
-    if not letzte and not history:
-        return
+    # Quelle bestimmen: YAML-Felder oder JSONL-Log
+    if letzte:
+        quelle = f"Letzte Ereignisse:\n{json.dumps(letzte, ensure_ascii=False)}"
+        if history:
+            quelle += f"\n\nÄltere History:\n{json.dumps(history, ensure_ascii=False)}"
+    else:
+        # Inhalt aus In-Memory-History oder JSONL
+        mem = _history.get(adventure_folder, [])
+        if mem:
+            quelle = "Konversations-History:\n" + "\n".join(
+                f"{'DM' if m['role'] == 'assistant' else 'Spieler'}: {m['content']}"
+                for m in mem
+            )
+        else:
+            quelle = "Konversations-Log:\n" + _load_session_text_from_log(adventure_folder)
+
+        if not quelle.strip() or len(quelle) < 50:
+            logger.info(f"[{adventure_folder}] Nichts zu komprimieren")
+            return
 
     prompt = (
         "Du bist ein Archiv-Assistent für ein TTRPG-Abenteuer. "
-        "Komprimiere den Spielverlauf nach diesen Regeln:\n\n"
-        "1. `letzte_ereignisse` (aktuelle Session) → fasse sie in 2-3 prägnante Sätze zusammen. "
-        "Wichtige Namen, Orte und Plot-Punkte müssen erhalten bleiben.\n"
-        "2. `history` (ältere Sessions) → fasse mehrere Einträge zu einem einzigen Satz zusammen "
-        "wenn sie thematisch zusammenpassen. Je älter, desto kürzer.\n\n"
-        "Antworte NUR mit einem JSON-Objekt mit den Feldern `letzte_ereignisse_komprimiert` (string) "
-        "und `history_komprimiert` (Liste von strings).\n\n"
-        f"letzte_ereignisse:\n{json.dumps(letzte, ensure_ascii=False)}\n\n"
-        f"history:\n{json.dumps(history, ensure_ascii=False)}"
+        "Fasse den Spielverlauf kompakt zusammen — bewahre alle wichtigen Namen, "
+        "Orte, Gegenstände und Plot-Punkte. Ältere Ereignisse kürzer, neuere etwas detaillierter.\n\n"
+        "Antworte NUR mit einem JSON-Objekt:\n"
+        "{\n"
+        '  "aktueller_ort": "Wo sind die Charaktere gerade",\n'
+        '  "letzte_szene": "1-2 Sätze was zuletzt passiert ist",\n'
+        '  "letzte_ereignisse": ["Ereignis 1", "Ereignis 2", ...],\n'
+        '  "history": ["Ältere Zusammenfassung 1", ...]\n'
+        "}\n\n"
+        f"{quelle}"
     )
 
     try:
         response = client.messages.create(
             model=MODEL,
-            max_tokens=500,
+            max_tokens=800,
             messages=[{"role": "user", "content": prompt}],
         )
         raw = response.content[0].text.strip()
-        # JSON aus Antwort extrahieren
         start = raw.find("{")
         end = raw.rfind("}") + 1
         data = json.loads(raw[start:end])
 
-        # Komprimierte Einträge in session.yaml schreiben
-        new_summary = data.get("letzte_ereignisse_komprimiert", "")
-        new_history = data.get("history_komprimiert", history)
-
-        if new_summary:
-            new_history = [new_summary] + new_history
-
-        session["history"] = new_history
-        session["letzte_ereignisse"] = []
+        session["aktueller_ort"] = data.get("aktueller_ort", session.get("aktueller_ort", ""))
+        session["letzte_szene"] = data.get("letzte_szene", "")
+        session["letzte_ereignisse"] = data.get("letzte_ereignisse", [])
+        session["history"] = data.get("history", history)
         session_manager.save_session(adventure_folder, session)
-        logger.info(f"[{adventure_folder}] Session komprimiert: {len(letzte)} Ereignisse → 1 Eintrag")
+        logger.info(f"[{adventure_folder}] Session komprimiert → {session['letzte_szene'][:60]}...")
 
     except Exception as e:
         logger.error(f"Session-Komprimierung fehlgeschlagen: {e}")
