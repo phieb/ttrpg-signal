@@ -17,7 +17,7 @@ from config import GOOGLE_API_KEY, TTRPG_PATH
 logger = logging.getLogger(__name__)
 
 TTRPG = Path(TTRPG_PATH)
-IMAGEN_MODEL = "imagen-3.0-generate-002"
+IMAGEN_MODEL = "imagen-4.0-fast-generate-001"
 
 
 def _get_portrait_prompt(adventure_folder: str, char_name: str) -> str | None:
