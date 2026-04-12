@@ -28,5 +28,8 @@ RESPONSE_DELAY_SECONDS = float(os.getenv("RESPONSE_DELAY_SECONDS", "2"))
 RATE_LIMIT_MESSAGES = int(os.getenv("RATE_LIMIT_MESSAGES", "5"))   # max Nachrichten…
 RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "60"))       # …pro X Sekunden
 
+# Nachrichten-Batching: warte X Sekunden nach der letzten Nachricht bevor der DM antwortet
+BATCH_WINDOW_SECONDS = int(os.getenv("BATCH_WINDOW_SECONDS", "60"))
+
 # Log-Rotation
 MAX_LOG_LINES = int(os.getenv("MAX_LOG_LINES", "500"))  # JSONL-Zeilen bis Rotation

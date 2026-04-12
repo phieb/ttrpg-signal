@@ -145,6 +145,17 @@ def mark_read(sender: str, timestamp: int) -> None:
         logger.warning(f"mark_read fehlgeschlagen für {sender}: {e}")
 
 
+def _normalize_group_id(raw_id: str) -> str:
+    """
+    Konvertiert die rohe Group-ID aus /v1/receive in das group.XXX Format
+    das die signal-cli REST API beim Erstellen/Auflisten von Gruppen verwendet.
+    receive liefert: "zfk4z/8K..."
+    create/list:     "group.emZrNH..." (= "group." + base64(raw_id))
+    """
+    import base64
+    return "group." + base64.b64encode(raw_id.encode()).decode()
+
+
 def extract_message(envelope: dict) -> dict | None:
     """Extrahiert relevante Felder aus einem Signal-Envelope."""
     try:
@@ -159,10 +170,13 @@ def extract_message(envelope: dict) -> dict | None:
         if not text:
             return None
 
+        raw_group_id = group_info.get("groupId") if group_info else None
+        group_id = _normalize_group_id(raw_group_id) if raw_group_id else None
+
         return {
             "sender": source,
             "text": text,
-            "group_id": group_info.get("groupId") if group_info else None,
+            "group_id": group_id,
             "timestamp": data_message.get("timestamp", 0),
         }
     except Exception as e:

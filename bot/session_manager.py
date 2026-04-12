@@ -136,6 +136,51 @@ def find_character_entry_by_name(player_name: str, char_name: str) -> dict | Non
     return None
 
 
+# ── Charakter-Vollständigkeit ─────────────────────────────────────────────────
+
+# Pflichtfelder für ein fertiges Charakterblatt (Pfad, Anzeigename)
+REQUIRED_CHAR_FIELDS = [
+    ("charakter.name",          "Name"),
+    ("identitaet.wer_bist_du",  "Hintergrund / Wer bist du"),
+    ("identitaet.aussehen",     "Aussehen"),
+    ("skills",                  "Skills (mindestens einer)"),
+    ("motivation.will",         "Was will dein Charakter"),
+    ("motivation.fuerchtet",    "Was fürchtet dein Charakter"),
+]
+
+
+def check_character_completeness(adventure_folder: str, player_names: list[str]) -> dict[str, list[str]]:
+    """
+    Prüft für jeden Spieler ob sein Charakterblatt vollständig ist.
+    Gibt {spielername: [fehlende Felder]} zurück — nur Spieler mit Lücken.
+    Spieler ohne YAML bekommen "Charakterblatt fehlt komplett".
+    """
+    chars_by_player = {}
+    for char in load_characters(adventure_folder):
+        owner = char.get("charakter", {}).get("gespielt_von", "").lower()
+        if owner:
+            chars_by_player[owner] = char
+
+    missing: dict[str, list[str]] = {}
+    for name in player_names:
+        char = chars_by_player.get(name.lower())
+        if not char:
+            missing[name] = ["Charakterblatt fehlt komplett"]
+            continue
+
+        gaps = []
+        for field_path, label in REQUIRED_CHAR_FIELDS:
+            val = char
+            for key in field_path.split("."):
+                val = val.get(key) if isinstance(val, dict) else None
+            if not val:
+                gaps.append(label)
+        if gaps:
+            missing[name] = gaps
+
+    return missing
+
+
 # ── Setting & NPCs ────────────────────────────────────────────────────────────
 
 def load_setting(adventure_folder: str) -> dict:

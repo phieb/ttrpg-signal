@@ -12,7 +12,7 @@ import dm_engine
 import generate_avatar
 from config import (
     SIGNAL_PHONE_NUMBER, ADMIN_PHONE_NUMBER, TTRPG_PATH, RESPONSE_DELAY_SECONDS,
-    RATE_LIMIT_MESSAGES, RATE_LIMIT_WINDOW,
+    RATE_LIMIT_MESSAGES, RATE_LIMIT_WINDOW, BATCH_WINDOW_SECONDS,
 )
 
 logging.basicConfig(
@@ -37,6 +37,79 @@ def handle_signal(sig, frame):
     running = False
     if not _processing:
         raise SystemExit(0)
+
+
+# ── Nachrichten-Batching ──────────────────────────────────────────────────────
+# Pro Abenteuer werden eingehende DM-Nachrichten gesammelt.
+# Erst wenn BATCH_WINDOW_SECONDS nach der letzten Nachricht vergangen sind,
+# antwortet der DM auf alle gesammelten Nachrichten auf einmal.
+
+_batch_messages: dict[str, list[tuple[str, str]]] = defaultdict(list)  # folder → [(name, text)]
+_batch_deadline: dict[str, float] = {}   # folder → monotonic-Zeitstempel
+_batch_reply_to: dict[str, str] = {}     # folder → reply_to
+_batch_senders: dict[str, set[str]] = defaultdict(set)  # folder → Menge der Absender im aktuellen Batch
+
+
+def _get_adventure_players(adventure_folder: str) -> set[str]:
+    """Gibt die Menge der Spielernamen (lowercase) eines Abenteuers zurück."""
+    try:
+        status = yaml.safe_load((TTRPG / "status.yaml").read_text()) or {}
+        for a in status.get("abenteuer", []):
+            if a.get("ordner") == adventure_folder:
+                return {s["name"].lower() for s in a.get("spieler", [])}
+    except Exception:
+        pass
+    return set()
+
+
+def _flush_batches() -> None:
+    """Verarbeitet alle Batches deren Wartezeit abgelaufen ist."""
+    global _processing
+    now = time.monotonic()
+    for folder in list(_batch_deadline):
+        if now < _batch_deadline[folder]:
+            continue
+
+        messages = _batch_messages.pop(folder)
+        del _batch_deadline[folder]
+        reply_to = _batch_reply_to.pop(folder)
+        _batch_senders.pop(folder, None)
+
+        # Mehrere Nachrichten zusammenfassen
+        if len(messages) == 1:
+            sender_name, text = messages[0]
+            combined = text
+        else:
+            sender_name = "Gruppe"
+            combined = "\n".join(f"**{n}:** {t}" for n, t in messages)
+
+        # Während Session 0: Charaktervollständigkeit prüfen und DM hinweisen
+        try:
+            session = session_manager.load_session(folder)
+            if session.get("status") == "session_0":
+                player_names = list(_get_adventure_players(folder))
+                if player_names:
+                    missing = session_manager.check_character_completeness(folder, player_names)
+                    if missing:
+                        hint = "[System: Folgende Charakterinfos fehlen noch — frage gezielt nach:]"
+                        for player, gaps in missing.items():
+                            hint += f"\n- {player}: {', '.join(gaps)}"
+                        combined += f"\n\n{hint}"
+                        logger.info(f"[{folder}] Charakterlücken: {missing}")
+        except Exception as e:
+            logger.warning(f"[{folder}] Vollständigkeitsprüfung fehlgeschlagen: {e}")
+
+        _processing = True
+        try:
+            time.sleep(RESPONSE_DELAY_SECONDS)
+            dm_reply = dm_engine.respond(folder, sender_name, combined)
+            signal_client.send(reply_to, dm_reply)
+        except Exception as e:
+            logger.error(f"[{folder}] Batch-Verarbeitung fehlgeschlagen: {e}", exc_info=True)
+        finally:
+            _processing = False
+            if not running:
+                raise SystemExit(0)
 
 
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
@@ -181,6 +254,19 @@ def cmd_neu(args: list, reply_to: str, **_) -> str:
     status_path.write_text(yaml.dump(data, allow_unicode=True, default_flow_style=False))
 
     logger.info(f"Neues Abenteuer erstellt: {ordner} (Gruppe: {group_id or '—'})")
+
+    # Willkommenstext in die neue Gruppe schicken
+    if group_id:
+        spieler_str = " ".join(f"@{s['name']}" for s in spieler_eintraege) if spieler_eintraege else ""
+        willkommen = (
+            f"⚔️ Willkommen zu **{name}**!\n\n"
+            f"Diese Gruppe ist euer Abenteurertreff. Hier antwortet euer Dungeon Master auf alles was ihr schreibt.\n\n"
+            f"*Bereit loszulegen?*\n\n"
+            f"Schreibt einfach **!session0** um Session 0 zu starten — dort erstellt ihr eure Charaktere und lernt die Welt kennen.\n\n"
+            f"Mit **!help** seht ihr alle verfügbaren Befehle. Viel Spaß am Spieltisch! 🎲"
+        )
+        signal_client.send(group_id, willkommen)
+
     return f"✅ Abenteuer **{name}** erstellt.{group_msg}"
 
 
@@ -589,30 +675,40 @@ def process_message(msg: dict, players: dict, registered_groups: set):
 
     logger.info(f"[{adventure_folder or '?'}] {sender_name}: {text}")
 
-    _processing = True
-    try:
-        # !Kommandos
-        if text.startswith("!"):
+    # !Kommandos sofort verarbeiten
+    if text.startswith("!"):
+        _processing = True
+        try:
             response = handle_command(text, sender, adventure_folder, reply_to, players)
             if response:
                 signal_client.send(reply_to, response)
-            return
+        except Exception as e:
+            logger.error(f"Fehler bei Kommando von {sender_name}: {e}", exc_info=True)
+        finally:
+            _processing = False
+            if not running:
+                raise SystemExit(0)
+        return
 
-        # Kein Abenteuer → ignorieren
-        if not adventure_folder:
-            logger.debug(f"Kein Abenteuer für {sender_name} — ignoriert")
-            return
+    # Kein Abenteuer → ignorieren
+    if not adventure_folder:
+        logger.debug(f"Kein Abenteuer für {sender_name} — ignoriert")
+        return
 
-        # DM antworten lassen
-        time.sleep(RESPONSE_DELAY_SECONDS)
-        dm_reply = dm_engine.respond(adventure_folder, sender_name, text)
-        signal_client.send(reply_to, dm_reply)
-    except Exception as e:
-        logger.error(f"Fehler bei Nachrichtenverarbeitung von {sender_name}: {e}", exc_info=True)
-    finally:
-        _processing = False
-        if not running:
-            raise SystemExit(0)
+    # Nachricht in Batch-Puffer
+    _batch_messages[adventure_folder].append((sender_name, text))
+    _batch_senders[adventure_folder].add(sender_name.lower())
+    _batch_deadline[adventure_folder] = time.monotonic() + BATCH_WINDOW_SECONDS
+    _batch_reply_to[adventure_folder] = reply_to
+
+    # Sofort verarbeiten wenn alle Spieler des Abenteuers geantwortet haben
+    expected = _get_adventure_players(adventure_folder)
+    if expected and _batch_senders[adventure_folder] >= expected:
+        _batch_deadline[adventure_folder] = 0
+        logger.info(f"[{adventure_folder}] Alle Spieler haben geantwortet — sofortige Verarbeitung")
+    else:
+        count = len(_batch_messages[adventure_folder])
+        logger.info(f"[{adventure_folder}] Gepuffert ({count} Nachricht{'en' if count > 1 else ''}), DM antwortet in ~{BATCH_WINDOW_SECONDS}s")
 
 
 # ── Main Loop ─────────────────────────────────────────────────────────────────
@@ -636,6 +732,7 @@ def main():
             if msg:
                 process_message(msg, players, registered_groups)
                 signal_client.mark_read(msg["sender"], msg["timestamp"])
+        _flush_batches()
         time.sleep(POLL_INTERVAL)
 
     logger.info("Bot beendet.")
