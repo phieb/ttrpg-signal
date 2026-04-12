@@ -84,25 +84,42 @@ def generate_avatar(adventure_folder: str, char_name: str) -> Path | None:
         return None
 
 
-def generate_and_send_avatars(adventure_folder: str, reply_to: str) -> None:
+def generate_and_send_avatars(adventure_folder: str, reply_to: str,
+                               char_name_filter: str | None = None) -> None:
     """
-    Generiert Avatare für alle Charaktere eines Abenteuers
-    und schickt sie via Signal.
+    !avatare          → Liste der Charakternamen
+    !avatare <name>   → Avatar für diesen Charakter generieren
     """
     characters = session_manager.load_characters(adventure_folder)
     if not characters:
         signal_client.send(reply_to, "❌ Keine Charaktere gefunden.")
         return
 
-    signal_client.send(reply_to, f"🎨 Generiere {len(characters)} Avatar(e)... kurz warten!")
+    # Kein Name → nur Liste anzeigen
+    if not char_name_filter:
+        lines = ["*Verfügbare Charaktere:*", ""]
+        for c in characters:
+            name = c.get("charakter", {}).get("name", "?")
+            lines.append(f"• {name}")
+        lines += ["", "Tippe _!avatare <name>_ um ein Portrait zu generieren."]
+        signal_client.send(reply_to, "\n".join(lines))
+        return
 
-    for char in characters:
-        char_name = char.get("charakter", {}).get("name")
-        if not char_name:
-            continue
+    # Name angegeben → Avatar generieren
+    match = next(
+        (c for c in characters
+         if c.get("charakter", {}).get("name", "").lower() == char_name_filter.lower()),
+        None
+    )
+    if not match:
+        names = ", ".join(c.get("charakter", {}).get("name", "?") for c in characters)
+        signal_client.send(reply_to, f"❌ '{char_name_filter}' nicht gefunden.\nVerfügbar: {names}")
+        return
 
-        avatar_path = generate_avatar(adventure_folder, char_name)
-        if avatar_path:
-            signal_client.send_file(reply_to, str(avatar_path), f"🧙 {char_name}")
-        else:
-            signal_client.send(reply_to, f"⚠️ Avatar für {char_name} konnte nicht generiert werden.")
+    char_name = match["charakter"]["name"]
+    signal_client.send(reply_to, f"🎨 Generiere Avatar für *{char_name}*... kurz warten!")
+    avatar_path = generate_avatar(adventure_folder, char_name)
+    if avatar_path:
+        signal_client.send_file(reply_to, str(avatar_path), f"🧙 {char_name}")
+    else:
+        signal_client.send(reply_to, f"⚠️ Avatar für {char_name} konnte nicht generiert werden.")

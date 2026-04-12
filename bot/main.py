@@ -174,10 +174,11 @@ def cmd_help(sender: str, **_) -> str:
     return "\n".join(lines)
 
 
-def cmd_avatare(adventure_folder: str, reply_to: str, **_) -> None:
-    """Generiert Avatare für alle Charaktere via Gemini Imagen."""
-    generate_avatar.generate_and_send_avatars(adventure_folder, reply_to)
-    return None  # generate_and_send_avatars schickt selbst
+def cmd_avatare(args: list, adventure_folder: str, reply_to: str, **_) -> None:
+    """!avatare → Liste | !avatare <name> → Avatar generieren."""
+    char_name = " ".join(args) if args else None
+    generate_avatar.generate_and_send_avatars(adventure_folder, reply_to, char_name)
+    return None
 
 
 def _format_charakter(char: dict) -> str:
