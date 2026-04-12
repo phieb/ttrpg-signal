@@ -12,6 +12,7 @@ from vertexai.preview.vision_models import ImageGenerationModel
 
 import session_manager
 import signal_client
+import usage_tracker
 from config import GCP_PROJECT, GCP_LOCATION, TTRPG_PATH
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,7 @@ def generate_avatar(adventure_folder: str, char_name: str) -> Path | None:
         model = ImageGenerationModel.from_pretrained(IMAGEN_MODEL)
         images = model.generate_images(prompt=prompt, number_of_images=1, aspect_ratio="1:1")
         images[0].save(str(output_path))
+        usage_tracker.track_imagen(1)
         logger.info(f"Avatar generiert: {output_path}")
         return output_path
 

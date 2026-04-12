@@ -1,0 +1,128 @@
+"""
+API-Nutzungs-Tracking für Anthropic (Claude) und Vertex AI (Imagen).
+Persistiert in TTRPG_PATH/usage.json — bleibt über Bot-Neustarts erhalten.
+
+Kosten (Stand 2025):
+  Claude Haiku 4.5: Input $0.80/M, Output $4.00/M, Cache-Read $0.08/M, Cache-Write $1.00/M
+  Imagen 4 Fast:    $0.02/Bild
+"""
+
+import json
+import logging
+from datetime import datetime
+from pathlib import Path
+
+from config import TTRPG_PATH
+
+logger = logging.getLogger(__name__)
+
+USAGE_FILE = Path(TTRPG_PATH) / "usage.json"
+
+# Kosten in USD pro Token (bzw. pro Bild)
+_ANTHROPIC_COST = {
+    "input":       0.80 / 1_000_000,
+    "output":      4.00 / 1_000_000,
+    "cache_read":  0.08 / 1_000_000,
+    "cache_write": 1.00 / 1_000_000,
+}
+_IMAGEN_COST_PER_IMAGE = 0.02
+
+
+def _load() -> dict:
+    try:
+        if USAGE_FILE.exists():
+            return json.loads(USAGE_FILE.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning(f"usage.json lesen fehlgeschlagen: {e}")
+    return {"anthropic": {"total": _empty_anthropic(), "by_month": {}},
+            "vertex":    {"total": _empty_vertex(),    "by_month": {}}}
+
+
+def _save(data: dict) -> None:
+    try:
+        USAGE_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        logger.warning(f"usage.json schreiben fehlgeschlagen: {e}")
+
+
+def _empty_anthropic() -> dict:
+    return {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0}
+
+
+def _empty_vertex() -> dict:
+    return {"images": 0}
+
+
+def _month() -> str:
+    return datetime.utcnow().strftime("%Y-%m")
+
+
+def track_anthropic(input_tokens: int, output_tokens: int,
+                    cache_read: int = 0, cache_write: int = 0) -> None:
+    """Zählt einen Anthropic API-Aufruf mit."""
+    data = _load()
+    for bucket in (data["anthropic"]["total"],
+                   data["anthropic"]["by_month"].setdefault(_month(), _empty_anthropic())):
+        bucket["input"]       += input_tokens
+        bucket["output"]      += output_tokens
+        bucket["cache_read"]  += cache_read
+        bucket["cache_write"] += cache_write
+    _save(data)
+
+
+def track_imagen(count: int = 1) -> None:
+    """Zählt generierte Vertex AI Bilder."""
+    data = _load()
+    for bucket in (data["vertex"]["total"],
+                   data["vertex"]["by_month"].setdefault(_month(), _empty_vertex())):
+        bucket["images"] += count
+    _save(data)
+
+
+def _anthropic_cost(b: dict) -> float:
+    return (b["input"]       * _ANTHROPIC_COST["input"]
+          + b["output"]      * _ANTHROPIC_COST["output"]
+          + b["cache_read"]  * _ANTHROPIC_COST["cache_read"]
+          + b["cache_write"] * _ANTHROPIC_COST["cache_write"])
+
+
+def _fmt_tokens(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n/1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n/1_000:.1f}K"
+    return str(n)
+
+
+def get_summary() -> str:
+    data = _load()
+    month = _month()
+    lines = ["📊 **API-Nutzung**\n"]
+
+    # ── Anthropic ────────────────────────────────────────────────────────────
+    at = data["anthropic"]["total"]
+    am = data["anthropic"]["by_month"].get(month, _empty_anthropic())
+    lines.append("**Anthropic (Claude Haiku)**")
+    lines.append(
+        f"Gesamt:  {_fmt_tokens(at['input'])} input · "
+        f"{_fmt_tokens(at['output'])} output · "
+        f"{_fmt_tokens(at['cache_read'])} cache-read · "
+        f"{_fmt_tokens(at['cache_write'])} cache-write"
+    )
+    lines.append(
+        f"{month}:  {_fmt_tokens(am['input'])} input · "
+        f"{_fmt_tokens(am['output'])} output · "
+        f"{_fmt_tokens(am['cache_read'])} cache-read · "
+        f"{_fmt_tokens(am['cache_write'])} cache-write"
+    )
+    lines.append(f"Kosten {month}: ~${_anthropic_cost(am):.3f}")
+    lines.append(f"Kosten gesamt: ~${_anthropic_cost(at):.3f}\n")
+
+    # ── Vertex AI ─────────────────────────────────────────────────────────────
+    vt = data["vertex"]["total"]
+    vm = data["vertex"]["by_month"].get(month, _empty_vertex())
+    lines.append("**Vertex AI (Imagen 4 Fast)**")
+    lines.append(f"Gesamt:  {vt['images']} Bilder (~${vt['images'] * _IMAGEN_COST_PER_IMAGE:.2f})")
+    lines.append(f"{month}:  {vm['images']} Bilder (~${vm['images'] * _IMAGEN_COST_PER_IMAGE:.2f})")
+
+    return "\n".join(lines)

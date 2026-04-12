@@ -7,6 +7,7 @@ from collections import defaultdict
 import anthropic
 
 import session_manager
+import usage_tracker
 from config import ANTHROPIC_API_KEY, TTRPG_PATH, MAX_CONTEXT_TOKENS, HISTORY_MESSAGES, MAX_LOG_LINES
 
 logger = logging.getLogger(__name__)
@@ -186,10 +187,16 @@ def respond(adventure_folder: str, sender_name: str, message: str) -> str:
         _log_message(adventure_folder, "assistant", "DM", dm_reply)
         _history[adventure_folder].append({"role": "assistant", "content": dm_reply})
 
+        cache_read  = getattr(response.usage, "cache_read_input_tokens", 0)
+        cache_write = getattr(response.usage, "cache_creation_input_tokens", 0)
         logger.info(
             f"[{adventure_folder}] Tokens: input={response.usage.input_tokens} "
             f"output={response.usage.output_tokens} "
-            f"cache_read={getattr(response.usage, 'cache_read_input_tokens', 0)}"
+            f"cache_read={cache_read} cache_write={cache_write}"
+        )
+        usage_tracker.track_anthropic(
+            response.usage.input_tokens, response.usage.output_tokens,
+            cache_read, cache_write,
         )
 
         _maybe_log_checkpoint(adventure_folder)
@@ -284,6 +291,11 @@ def compress_session(adventure_folder: str, detailed: bool = False) -> None:
         end = raw.rfind("}") + 1
         data = json.loads(raw[start:end])
 
+        usage_tracker.track_anthropic(
+            response.usage.input_tokens, response.usage.output_tokens,
+            getattr(response.usage, "cache_read_input_tokens", 0),
+            getattr(response.usage, "cache_creation_input_tokens", 0),
+        )
         session["aktueller_ort"] = data.get("aktueller_ort", session.get("aktueller_ort", ""))
         session["letzte_szene"] = data.get("letzte_szene", "")
         session["letzte_ereignisse"] = data.get("letzte_ereignisse", [])
@@ -345,6 +357,11 @@ def extract_characters_from_history(adventure_folder: str, player_names: list[st
         start = raw.find("{")
         end = raw.rfind("}") + 1
         data = json.loads(raw[start:end])
+        usage_tracker.track_anthropic(
+            response.usage.input_tokens, response.usage.output_tokens,
+            getattr(response.usage, "cache_read_input_tokens", 0),
+            getattr(response.usage, "cache_creation_input_tokens", 0),
+        )
         result = data.get("charaktere", {})
         logger.info(f"[{adventure_folder}] Charaktere extrahiert: {list(result.keys())}")
         return result

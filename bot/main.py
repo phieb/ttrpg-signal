@@ -10,6 +10,7 @@ import signal_client
 import session_manager
 import dm_engine
 import generate_avatar
+import usage_tracker
 from config import (
     SIGNAL_PHONE_NUMBER, ADMIN_PHONE_NUMBER, TTRPG_PATH, RESPONSE_DELAY_SECONDS,
     RATE_LIMIT_MESSAGES, RATE_LIMIT_WINDOW, BATCH_WINDOW_SECONDS,
@@ -267,6 +268,10 @@ PLAYER_COMMANDS = {"!help", "!charakter", "!avatar"}
 
 
 # ── Kommandos ─────────────────────────────────────────────────────────────────
+
+def cmd_usage(**_) -> str:
+    return usage_tracker.get_summary()
+
 
 def cmd_pause(adventure_folder: str, **_) -> str:
     dm_engine.compress_session(adventure_folder, detailed=True)
@@ -576,6 +581,7 @@ def cmd_help(sender: str, **_) -> str:
             "!spieler — alle registrierten Spieler anzeigen",
             "!spiele — alle Abenteuer anzeigen",
             "!spiel <name> — Zusammenfassung eines Abenteuers",
+            "!usage — API-Nutzung & geschätzte Kosten anzeigen",
         ]
 
     return "\n".join(lines)
@@ -724,12 +730,13 @@ COMMANDS = {
     "!session0":  cmd_session0,
     "!dm":        cmd_dm,
     "!charakter": cmd_charakter,
-    "!avatar":   cmd_avatar,
+    "!avatar":    cmd_avatar,
     "!help":      cmd_help,
     "!invite":    cmd_invite,
     "!spieler":   cmd_spieler,
     "!spiele":    cmd_spiele,
     "!spiel":     cmd_spiel,
+    "!usage":     cmd_usage,
 }
 
 NEEDS_ADVENTURE = {"!pause", "!status", "!session0", "!avatar"}
