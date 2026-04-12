@@ -97,48 +97,47 @@ docker compose up -d
 
 ## Neues Abenteuer anlegen
 
-1. Signal-Gruppe auf dem Handy erstellen
-2. Gruppen-ID auslesen:
-   ```bash
-   curl -s http://localhost:8085/v1/groups/+43NUMMER
+1. Spieler registrieren (einmalig pro Spieler):
    ```
-3. In `status.yaml` eintragen:
-   ```yaml
-   abenteuer:
-     - ordner: "mein_abenteuer"
-       name: "Mein Abenteuer"
-       status: session_0
-       signal_gruppe: "GRUPPEN_ID"
-       spieler:
-         - name: "Phieb"
-         - name: "Markus"
+   !invite +43... Name
    ```
-4. Ordner anlegen via Signal: `!neu Mein Abenteuer`
-5. Session 0 starten: `!session0`
+2. Abenteuer anlegen — erstellt Ordnerstruktur, Signal-Gruppe und schickt Willkommenstext:
+   ```
+   !neu Mein Abenteuer @Spieler1 @Spieler2
+   ```
+3. Session 0 starten (Charaktererstellung + Weltenbau):
+   ```
+   !session0
+   ```
+
+Der Bot finalisiert Session 0 automatisch sobald alle Charakterblätter vollständig sind — er legt YAMLs an, generiert Portraits und schickt Charakterblatt-PDFs in die Gruppe.
 
 ---
 
 ## Kommandos
 
-### Alle registrierten Spieler
+### Alle Spieler (1:1 oder Gruppe)
 
 | Kommando | Beschreibung |
 |----------|-------------|
 | `!help` | Verfügbare Kommandos anzeigen |
-| `!charakter` | Eigene Charaktere anzeigen |
-| `!charakter <name>` | Bestimmten Charakter anzeigen |
+| `!charakter` | Eigenes Charakterblatt + PDF anzeigen (im Gruppenchat: Charakter des laufenden Abenteuers) |
+| `!charakter <name>` | Bestimmten Charakter nach Name suchen |
+| `!avatar` | Eigenes Portrait anzeigen / neu generieren (im Gruppenchat: direkt der eigene Charakter) |
 
 ### Nur Admin
 
 | Kommando | Beschreibung |
 |----------|-------------|
-| `!status` | Aktueller Spielstand (Ort, Szene, Quests) |
-| `!pause` | Spielstand speichern, Session beenden |
-| `!neu <name>` | Neues Abenteuer anlegen |
-| `!session0` | Session 0 starten |
-| `!dm @Spieler <text>` | Geheime 1:1 Nachricht an Spieler |
-| `!avatare` | Charakterliste anzeigen |
-| `!avatare <name>` | Portrait für diesen Charakter generieren |
+| `!status` | Aktueller Spielstand (Ort, letzte Szene, Ereignisse) |
+| `!pause` | Spielstand per Claude komprimieren → session.yaml, Session beenden |
+| `!session0` | Session 0 starten — DM führt durch Charaktererstellung |
+| `!neu <name> [@Spieler1 @Spieler2 ...]` | Neues Abenteuer anlegen, Signal-Gruppe erstellen, Spieler einladen |
+| `!invite +43... Name` | Spieler registrieren (players/Name.yaml anlegen) + Willkommensnachricht schicken |
+| `!dm @Spieler <text>` | Geheime 1:1 Nachricht an einen Spieler |
+| `!spieler` | Alle registrierten Spieler mit Nummer und Rolle anzeigen |
+| `!spiele` | Alle Abenteuer mit Status und letztem Spieltag anzeigen |
+| `!spiel <name>` | Zusammenfassung eines Abenteuers (Setting, Spieler, Charaktere, letzte Szene) |
 
 ---
 
