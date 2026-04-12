@@ -41,16 +41,21 @@ cp .env.example .env
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
-GOOGLE_API_KEY=...              # optional, nicht aktiv genutzt
-SIGNAL_PHONE_NUMBER=+43...      # Castle Assistant Nummer (linked device)
+SIGNAL_PHONE_NUMBER=+43...      # Bot-Nummer (linked device)
 ADMIN_PHONE_NUMBER=+43...       # Wer !kommandos schicken darf
 TTRPG_PATH=/mnt/ttrpg
 MAX_CONTEXT_TOKENS=3000
-HISTORY_MESSAGES=10
+HISTORY_MESSAGES=6
 RESPONSE_DELAY_SECONDS=2
 GCP_PROJECT=...                 # GCP Projekt-ID für Vertex AI
 GCP_LOCATION=us-central1
+RATE_LIMIT_MESSAGES=5
+RATE_LIMIT_WINDOW=60
+BATCH_WINDOW_SECONDS=60
+MAX_LOG_LINES=500
 ```
+
+Alle Variablen mit Beschreibung: siehe `.env.example`.
 
 ### 3. GCP Service Account (für Avatar-Generierung)
 
