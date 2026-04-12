@@ -242,6 +242,62 @@ def compress_session(adventure_folder: str) -> None:
         logger.error(f"Session-Komprimierung fehlgeschlagen: {e}")
 
 
+def extract_characters_from_history(adventure_folder: str, player_names: list[str]) -> dict[str, dict]:
+    """
+    Analysiert die Konversations-History der Session 0 und extrahiert strukturierte
+    Charakterdaten für jeden Spieler. Gibt {spielername: char_dict} zurück.
+    """
+    history = _history.get(adventure_folder, [])
+    if not history:
+        return {}
+
+    conversation = "\n".join(
+        f"DM: {msg['content']}" if msg["role"] == "assistant"
+        else msg["content"]
+        for msg in history
+    )
+
+    players_str = ", ".join(player_names)
+    prompt = (
+        f"Analysiere dieses Session-0-Gespräch und extrahiere die Charakterdaten "
+        f"für die Spieler: {players_str}\n\n"
+        f"Gespräch:\n{conversation}\n\n"
+        "Gib die extrahierten Daten als JSON zurück — nur Felder die tatsächlich "
+        "im Gespräch vorkommen, keine Erfindungen:\n"
+        '{"charaktere": {"SpielerName": {'
+        '"name": "Charaktername", '
+        '"wer_bist_du": "Kurze Charakterbeschreibung", '
+        '"aussehen": "Aussehen", '
+        '"alter": "Alter", '
+        '"herkunft": "Herkunft", '
+        '"skills": [{"name": "Skillname", "beschreibung": "Kurze Beschreibung"}], '
+        '"will": "Ziel/Wunsch des Charakters", '
+        '"fuerchtet": "Angst/Schwäche", '
+        '"geheimnis": "Geheimnis (falls erwähnt)", '
+        '"begleiter": "Wichtige Beziehung (falls erwähnt)", '
+        '"imagen_prompt": "Detailed English portrait prompt: appearance, clothing, style, background, lighting, mood"'
+        "}}}\n\n"
+        "Nur JSON zurückgeben. Felder weglassen wenn keine Info vorhanden."
+    )
+
+    try:
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = response.content[0].text.strip()
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        data = json.loads(raw[start:end])
+        result = data.get("charaktere", {})
+        logger.info(f"[{adventure_folder}] Charaktere extrahiert: {list(result.keys())}")
+        return result
+    except Exception as e:
+        logger.error(f"[{adventure_folder}] Charakter-Extraktion fehlgeschlagen: {e}")
+        return {}
+
+
 def clear_history(adventure_folder: str) -> None:
     """Löscht History und JSONL-Log nach einer Pause/Session-Save."""
     _history[adventure_folder] = []

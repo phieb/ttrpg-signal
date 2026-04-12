@@ -128,6 +128,68 @@ def find_character_by_name(player_name: str, char_name: str) -> dict | None:
     return None
 
 
+def get_adventure_player_names_proper(adventure_folder: str) -> list[str]:
+    """
+    Gibt die Spielernamen eines Abenteuers mit korrekter Groß-/Kleinschreibung zurück
+    (cross-referenced mit players/*.yaml).
+    """
+    status = _load_yaml(TTRPG / "status.yaml")
+    raw_names = []
+    for a in status.get("abenteuer", []):
+        if a.get("ordner") == adventure_folder:
+            raw_names = [s["name"] for s in a.get("spieler", [])]
+            break
+
+    proper: dict[str, str] = {}
+    for f in (TTRPG / "players").glob("*.yaml"):
+        try:
+            data = yaml.safe_load(f.read_text()) or {}
+            n = data.get("spieler", {}).get("name", "")
+            if n:
+                proper[n.lower()] = n
+        except Exception:
+            pass
+
+    return [proper.get(n.lower(), n.title()) for n in raw_names]
+
+
+def save_character(adventure_folder: str, player_name: str, char_data: dict) -> Path | None:
+    """
+    Schreibt ein extrahiertes Charakterblatt als YAML.
+    Überschreibt bestehende Dateien (Session-0-Daten wachsen mit der Konversation).
+    """
+    chars_dir = TTRPG / "adventures" / adventure_folder / "characters"
+    chars_dir.mkdir(exist_ok=True)
+
+    char_name = char_data.get("name") or player_name
+    slug = char_name.lower().replace(" ", "_")
+    yaml_path = chars_dir / f"{slug}.yaml"
+
+    char_yaml = {
+        "charakter": {"name": char_name, "gespielt_von": player_name},
+        "identitaet": {k: v for k, v in {
+            "wer_bist_du": char_data.get("wer_bist_du", ""),
+            "aussehen":    char_data.get("aussehen", ""),
+            "alter":       char_data.get("alter", ""),
+            "herkunft":    char_data.get("herkunft", ""),
+        }.items() if v},
+        "skills": char_data.get("skills", []),
+        "motivation": {k: v for k, v in {
+            "will":       char_data.get("will", ""),
+            "fuerchtet":  char_data.get("fuerchtet", ""),
+            "geheimnis":  char_data.get("geheimnis", ""),
+        }.items() if v},
+        "beziehungen": {k: v for k, v in {
+            "begleiter": char_data.get("begleiter", ""),
+        }.items() if v},
+        "imagen_prompt": char_data.get("imagen_prompt", ""),
+    }
+
+    yaml_path.write_text(yaml.dump(char_yaml, allow_unicode=True, default_flow_style=False))
+    logger.info(f"Charakter gespeichert: {yaml_path.name}")
+    return yaml_path
+
+
 def find_character_entry_by_name(player_name: str, char_name: str) -> dict | None:
     """Sucht einen Charakter über alle Abenteuer, gibt {"char": dict, "abenteuer": "folder"} zurück."""
     for entry in get_all_characters_for_player(player_name):

@@ -62,6 +62,77 @@ def _get_adventure_players(adventure_folder: str) -> set[str]:
     return set()
 
 
+_session0_finalized: set[str] = set()  # Abenteuer die bereits finalisiert wurden
+
+
+def _finalize_session_0(folder: str, reply_to: str) -> None:
+    """Avatare generieren, Sheets senden, Session auf aktiv setzen."""
+    global _session0_finalized
+    if folder in _session0_finalized:
+        return
+    _session0_finalized.add(folder)
+
+    logger.info(f"[{folder}] Session 0 wird abgeschlossen")
+    signal_client.send(reply_to, "✅ Alle Charaktere sind vollständig! Ich generiere die Portraits...")
+
+    chars = session_manager.load_characters(folder)
+    for char in chars:
+        char_name = char.get("charakter", {}).get("name", "")
+        if not char_name:
+            continue
+        avatar_path = generate_avatar.generate_avatar(folder, char_name)
+        if avatar_path:
+            # Avatar ist jetzt vorhanden — _send_charakter schickt Text + Avatar + PDF
+            pass
+        _send_charakter({"char": char, "abenteuer": folder}, reply_to)
+
+    # Session-Status aktualisieren
+    session = session_manager.load_session(folder)
+    session["status"] = "aktiv"
+    session_manager.save_session(folder, session)
+
+    status_path = TTRPG / "status.yaml"
+    try:
+        data = yaml.safe_load(status_path.read_text()) or {}
+        for a in data.get("abenteuer", []):
+            if a.get("ordner") == folder:
+                a["status"] = "aktiv"
+                break
+        status_path.write_text(yaml.dump(data, allow_unicode=True, default_flow_style=False))
+    except Exception as e:
+        logger.warning(f"status.yaml Update fehlgeschlagen: {e}")
+
+    signal_client.send(reply_to, "⚔️ Session 0 abgeschlossen — das Abenteuer kann beginnen!")
+    logger.info(f"[{folder}] Session 0 abgeschlossen")
+
+
+def _maybe_finalize_session_0(folder: str, reply_to: str) -> None:
+    """
+    Nach jedem DM-Zug in Session 0:
+    1. Versuche Charaktere aus der History zu extrahieren und als YAML zu speichern.
+    2. Wenn alle vollständig → finalisieren.
+    """
+    if folder in _session0_finalized:
+        return
+
+    player_names = session_manager.get_adventure_player_names_proper(folder)
+    if not player_names:
+        return
+
+    # Extraktion versuchen (überschreibt bestehende YAMLs mit aktuelleren Daten)
+    extracted = dm_engine.extract_characters_from_history(folder, player_names)
+    for player_name, char_data in extracted.items():
+        if char_data.get("name"):
+            session_manager.save_character(folder, player_name, char_data)
+
+    # Vollständigkeit prüfen
+    missing = session_manager.check_character_completeness(folder, player_names)
+    if not missing:
+        _finalize_session_0(folder, reply_to)
+    else:
+        logger.info(f"[{folder}] Noch nicht vollständig: {missing}")
+
+
 def _flush_batches() -> None:
     """Verarbeitet alle Batches deren Wartezeit abgelaufen ist."""
     global _processing
@@ -83,10 +154,13 @@ def _flush_batches() -> None:
             sender_name = "Gruppe"
             combined = "\n".join(f"**{n}:** {t}" for n, t in messages)
 
+        # Session-Status laden
+        session = session_manager.load_session(folder)
+        is_session_0 = session.get("status") == "session_0" and folder not in _session0_finalized
+
         # Während Session 0: Charaktervollständigkeit prüfen und DM hinweisen
-        try:
-            session = session_manager.load_session(folder)
-            if session.get("status") == "session_0":
+        if is_session_0:
+            try:
                 player_names = list(_get_adventure_players(folder))
                 if player_names:
                     missing = session_manager.check_character_completeness(folder, player_names)
@@ -96,14 +170,18 @@ def _flush_batches() -> None:
                             hint += f"\n- {player}: {', '.join(gaps)}"
                         combined += f"\n\n{hint}"
                         logger.info(f"[{folder}] Charakterlücken: {missing}")
-        except Exception as e:
-            logger.warning(f"[{folder}] Vollständigkeitsprüfung fehlgeschlagen: {e}")
+            except Exception as e:
+                logger.warning(f"[{folder}] Vollständigkeitsprüfung fehlgeschlagen: {e}")
 
         _processing = True
         try:
             time.sleep(RESPONSE_DELAY_SECONDS)
             dm_reply = dm_engine.respond(folder, sender_name, combined)
             signal_client.send(reply_to, dm_reply)
+
+            # Session 0: Charaktere aus History extrahieren und ggf. finalisieren
+            if is_session_0:
+                _maybe_finalize_session_0(folder, reply_to)
         except Exception as e:
             logger.error(f"[{folder}] Batch-Verarbeitung fehlgeschlagen: {e}", exc_info=True)
         finally:
@@ -550,12 +628,24 @@ def _send_charakter(entry: dict, reply_to: str) -> None:
         signal_client.send_file(reply_to, str(pdf_path), f"📜 Charakterblatt {char_name}")
 
 
-def cmd_charakter(sender: str, args: list, players: dict, reply_to: str, **_) -> None:
+def cmd_charakter(sender: str, args: list, players: dict, reply_to: str,
+                   adventure_folder: str | None = None, **_) -> None:
     """
-    !charakter         → alle eigenen Charaktere, oder direkt anzeigen wenn nur einer
-    !charakter <name>  → bestimmten Charakter anzeigen (mit Avatar + PDF)
+    Im Gruppenchat: Charakter des Spielers für dieses Abenteuer anzeigen.
+    Im 1:1 Chat:    Alle Charaktere des Spielers durchsuchen.
     """
     player_name = signal_client.get_sender_name(sender, players)
+
+    # Gruppenchat → nur dieses Abenteuer
+    if adventure_folder:
+        char = session_manager.get_character_for_player(adventure_folder, player_name)
+        if not char:
+            signal_client.send(reply_to, f"❌ Kein Charakter für {player_name} in diesem Abenteuer gefunden.")
+            return None
+        _send_charakter({"char": char, "abenteuer": adventure_folder}, reply_to)
+        return None
+
+    # 1:1 Chat → alle Abenteuer durchsuchen
     all_chars = session_manager.get_all_characters_for_player(player_name)
 
     if not all_chars:
@@ -578,7 +668,7 @@ def cmd_charakter(sender: str, args: list, players: dict, reply_to: str, **_) ->
         _send_charakter(all_chars[0], reply_to)
         return None
 
-    # Mehrere → Liste zurückgeben
+    # Mehrere → Liste
     lines = [f"**{player_name}s Charaktere:**", ""]
     for entry in all_chars:
         name = entry["char"].get("charakter", {}).get("name", "?")
