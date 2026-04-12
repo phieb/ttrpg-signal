@@ -7,7 +7,7 @@ from collections import defaultdict
 import anthropic
 
 import session_manager
-from config import ANTHROPIC_API_KEY, TTRPG_PATH, MAX_CONTEXT_TOKENS, HISTORY_MESSAGES
+from config import ANTHROPIC_API_KEY, TTRPG_PATH, MAX_CONTEXT_TOKENS, HISTORY_MESSAGES, MAX_LOG_LINES
 
 logger = logging.getLogger(__name__)
 
@@ -56,10 +56,10 @@ def _build_system(adventure_folder: str) -> list:
                 "und sind unten als 'Aktueller Spielstand' eingebettet. "
                 "Erwähne niemals Dateien oder fehlenden Zugriff. "
                 "Steige direkt als DM in die Szene ein.\n\n"
-                "FORMATIERUNG: Du schreibst in Signal. Verwende ausschließlich Signal-Formatierung:\n"
-                "- *fett* für wichtige Begriffe, Ortsnamen, NSC-Namen\n"
-                "- _kursiv_ für atmosphärische Beschreibungen, Gedanken, Flüstern\n"
-                "- Keine Markdown-Header (##), keine HTML\n"
+                "FORMATIERUNG: Du schreibst in Signal (text_mode=styled). Verwende ausschließlich:\n"
+                "- **fett** für wichtige Begriffe, Ortsnamen, NSC-Namen\n"
+                "- *kursiv* für atmosphärische Beschreibungen, Gedanken, Flüstern\n"
+                "- Keine Markdown-Header (##), keine HTML, kein Underscore-Italic\n"
                 "- Emojis sparsam einsetzen, nur wenn sie zur Atmosphäre passen\n\n"
                 f"## Aktueller Spielstand\n\n{context}"
             ),
@@ -74,8 +74,20 @@ def _trim_history(adventure_folder: str) -> None:
         _history[adventure_folder] = history[-(HISTORY_MESSAGES * 2):]
 
 
+def _rotate_log_if_needed(log_path: Path) -> None:
+    """Trimmt das JSONL auf MAX_LOG_LINES wenn es zu groß wird."""
+    try:
+        lines = log_path.read_text(encoding="utf-8").splitlines(keepends=True)
+        if len(lines) > MAX_LOG_LINES:
+            keep = lines[-MAX_LOG_LINES:]
+            log_path.write_text("".join(keep), encoding="utf-8")
+            logger.info(f"Log rotiert: {len(lines)} → {len(keep)} Zeilen ({log_path.name})")
+    except Exception as e:
+        logger.warning(f"Log-Rotation fehlgeschlagen: {e}")
+
+
 def _log_message(adventure_folder: str, role: str, name: str, text: str) -> None:
-    """Hängt eine Nachricht ans JSONL-Log an — crash-safe."""
+    """Hängt eine Nachricht ans JSONL-Log an — crash-safe, mit Rotation."""
     log_path = TTRPG / "adventures" / adventure_folder / "spielprotokoll.jsonl"
     entry = {
         "ts": datetime.utcnow().isoformat(),
@@ -86,6 +98,7 @@ def _log_message(adventure_folder: str, role: str, name: str, text: str) -> None
     try:
         with log_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        _rotate_log_if_needed(log_path)
     except Exception as e:
         logger.warning(f"Log-Schreiben fehlgeschlagen ({log_path}): {e}")
 

@@ -23,3 +23,10 @@ TTRPG_PATH = os.getenv("TTRPG_PATH", "/mnt/ttrpg")
 MAX_CONTEXT_TOKENS = int(os.getenv("MAX_CONTEXT_TOKENS", "3000"))
 HISTORY_MESSAGES = int(os.getenv("HISTORY_MESSAGES", "10"))
 RESPONSE_DELAY_SECONDS = float(os.getenv("RESPONSE_DELAY_SECONDS", "2"))
+
+# Rate Limiting (pro Absender)
+RATE_LIMIT_MESSAGES = int(os.getenv("RATE_LIMIT_MESSAGES", "5"))   # max Nachrichten…
+RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "60"))       # …pro X Sekunden
+
+# Log-Rotation
+MAX_LOG_LINES = int(os.getenv("MAX_LOG_LINES", "500"))  # JSONL-Zeilen bis Rotation

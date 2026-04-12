@@ -126,6 +126,13 @@ def find_character_by_name(player_name: str, char_name: str) -> dict | None:
         if entry["char"].get("charakter", {}).get("name", "").lower() == char_name.lower():
             return entry["char"]
     return None
+
+
+def find_character_entry_by_name(player_name: str, char_name: str) -> dict | None:
+    """Sucht einen Charakter über alle Abenteuer, gibt {"char": dict, "abenteuer": "folder"} zurück."""
+    for entry in get_all_characters_for_player(player_name):
+        if entry["char"].get("charakter", {}).get("name", "").lower() == char_name.lower():
+            return entry
     return None
 
 

@@ -87,11 +87,11 @@ def generate_and_send_avatars(adventure_folder: str, reply_to: str,
 
     # Kein Name → nur Liste anzeigen
     if not char_name_filter:
-        lines = ["*Verfügbare Charaktere:*", ""]
+        lines = ["**Verfügbare Charaktere:**", ""]
         for c in characters:
             name = c.get("charakter", {}).get("name", "?")
             lines.append(f"• {name}")
-        lines += ["", "Tippe _!avatare <name>_ um ein Portrait zu generieren."]
+        lines += ["", "Tippe *!avatare <name>* um ein Portrait zu generieren."]
         signal_client.send(reply_to, "\n".join(lines))
         return
 
@@ -107,7 +107,7 @@ def generate_and_send_avatars(adventure_folder: str, reply_to: str,
         return
 
     char_name = match["charakter"]["name"]
-    signal_client.send(reply_to, f"🎨 Generiere Avatar für *{char_name}*... kurz warten!")
+    signal_client.send(reply_to, f"🎨 Generiere Avatar für **{char_name}**... kurz warten!")
     avatar_path = generate_avatar(adventure_folder, char_name)
     if avatar_path:
         signal_client.send_file(reply_to, str(avatar_path), f"🧙 {char_name}")

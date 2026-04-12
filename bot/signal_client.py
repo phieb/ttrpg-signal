@@ -1,3 +1,4 @@
+import time
 import requests
 import yaml
 import logging
@@ -5,6 +6,33 @@ from pathlib import Path
 from config import SIGNAL_CLI_URL, SIGNAL_PHONE_NUMBER, TTRPG_PATH
 
 logger = logging.getLogger(__name__)
+
+_RETRY_DELAYS = [1, 3, 8]  # Sekunden zwischen Versuchen
+
+
+def _post_with_retry(url: str, **kwargs) -> requests.Response:
+    """HTTP POST mit bis zu 3 Wiederholungsversuchen bei transienten Fehlern."""
+    last_exc = None
+    for attempt, delay in enumerate([0] + _RETRY_DELAYS, 1):
+        if delay:
+            time.sleep(delay)
+        try:
+            r = requests.post(url, **kwargs)
+            r.raise_for_status()
+            return r
+        except requests.exceptions.ConnectionError as e:
+            last_exc = e
+            logger.warning(f"Verbindungsfehler (Versuch {attempt}): {e}")
+        except requests.exceptions.HTTPError as e:
+            # 5xx → retry, 4xx → sofort abbrechen
+            if e.response is not None and e.response.status_code < 500:
+                raise
+            last_exc = e
+            logger.warning(f"HTTP {e.response.status_code} (Versuch {attempt}): {e}")
+        except requests.exceptions.Timeout as e:
+            last_exc = e
+            logger.warning(f"Timeout (Versuch {attempt})")
+    raise last_exc
 
 
 def load_players() -> dict:
@@ -41,43 +69,63 @@ def receive() -> list:
 
 
 def send(recipient: str, message: str) -> bool:
-    """Sendet eine Nachricht an eine Nummer oder Gruppen-ID."""
+    """Sendet eine Nachricht an eine Nummer oder Gruppen-ID (mit Retry)."""
     try:
-        r = requests.post(
+        _post_with_retry(
             f"{SIGNAL_CLI_URL}/v2/send",
             json={
                 "message": message,
                 "number": SIGNAL_PHONE_NUMBER,
                 "recipients": [recipient],
+                "text_mode": "styled",
             },
             timeout=10,
         )
-        r.raise_for_status()
         return True
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Fehler beim Senden an {recipient}: {e}")
+    except Exception as e:
+        logger.error(f"Senden an {recipient} fehlgeschlagen: {e}")
         return False
 
 
 def send_file(recipient: str, file_path: str, caption: str = "") -> bool:
-    """Sendet eine Datei (z.B. Avatar-PNG) als Signal-Attachment."""
+    """Sendet eine Datei als Signal-Attachment (mit Retry)."""
     try:
+        import base64
         with open(file_path, "rb") as f:
-            import base64
             data = base64.b64encode(f.read()).decode()
 
-        payload = {
-            "message": caption,
-            "number": SIGNAL_PHONE_NUMBER,
-            "recipients": [recipient],
-            "base64_attachments": [data],
-        }
-        r = requests.post(f"{SIGNAL_CLI_URL}/v2/send", json=payload, timeout=30)
-        r.raise_for_status()
+        _post_with_retry(
+            f"{SIGNAL_CLI_URL}/v2/send",
+            json={
+                "message": caption,
+                "number": SIGNAL_PHONE_NUMBER,
+                "recipients": [recipient],
+                "base64_attachments": [data],
+                "text_mode": "styled",
+            },
+            timeout=30,
+        )
         return True
     except Exception as e:
-        logger.error(f"Fehler beim Senden von {file_path} an {recipient}: {e}")
+        logger.error(f"Senden von {file_path} an {recipient} fehlgeschlagen: {e}")
         return False
+
+
+def create_group(name: str, members: list[str]) -> str | None:
+    """Erstellt eine neue Signal-Gruppe und gibt die Gruppen-ID zurück."""
+    try:
+        r = requests.post(
+            f"{SIGNAL_CLI_URL}/v1/groups/{SIGNAL_PHONE_NUMBER}",
+            json={"name": name, "members": members},
+            timeout=15,
+        )
+        r.raise_for_status()
+        group_id = r.json().get("id")
+        logger.info(f"Signal-Gruppe erstellt: '{name}' → {group_id}")
+        return group_id
+    except Exception as e:
+        logger.error(f"Gruppe erstellen fehlgeschlagen: {e}")
+        return None
 
 
 def mark_read(sender: str, timestamp: int) -> None:
