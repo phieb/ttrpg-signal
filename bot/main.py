@@ -55,6 +55,15 @@ def find_player_phone(name: str) -> str | None:
     return None
 
 
+# ── Autorisierung ────────────────────────────────────────────────────────────
+
+def is_registered_player(sender: str, players: dict) -> bool:
+    return sender in players
+
+# Kommandos die jeder registrierte Spieler nutzen kann
+PLAYER_COMMANDS = {"!help", "!charakter"}
+
+
 # ── Kommandos ─────────────────────────────────────────────────────────────────
 
 def cmd_pause(adventure_folder: str, **_) -> str:
@@ -141,6 +150,30 @@ def cmd_dm(args: list, **_) -> str:
     return f"✅ Nachricht an {spieler_name} gesendet."
 
 
+def cmd_help(sender: str, **_) -> str:
+    is_admin = sender == ADMIN_PHONE_NUMBER
+    lines = ["*Verfügbare Kommandos:*", ""]
+
+    lines += [
+        "!charakter — dein Charakterblatt anzeigen",
+        "!help — diese Hilfe",
+    ]
+
+    if is_admin:
+        lines += [
+            "",
+            "*Admin:*",
+            "!status — aktueller Spielstand",
+            "!pause — Spielstand speichern & Session beenden",
+            "!neu [name] — neues Abenteuer anlegen",
+            "!session0 — Session 0 starten",
+            "!dm @Spieler [text] — geheime 1:1 Nachricht",
+            "!avatare — Charakter-Portraits generieren",
+        ]
+
+    return "\n".join(lines)
+
+
 def cmd_avatare(adventure_folder: str, reply_to: str, **_) -> None:
     """Generiert Avatare für alle Charaktere via Gemini Imagen."""
     generate_avatar.generate_and_send_avatars(adventure_folder, reply_to)
@@ -182,7 +215,10 @@ COMMANDS = {
     "!dm":        cmd_dm,
     "!charakter": cmd_charakter,
     "!avatare":   cmd_avatare,
+    "!help":      cmd_help,
 }
+
+NEEDS_ADVENTURE = {"!pause", "!status", "!session0", "!charakter", "!avatare"}
 
 
 def handle_command(text: str, sender: str, adventure_folder: str | None,
@@ -191,11 +227,19 @@ def handle_command(text: str, sender: str, adventure_folder: str | None,
     cmd = parts[0].lower()
     args = parts[1:]
 
+    is_admin = sender == ADMIN_PHONE_NUMBER
+    is_player = is_registered_player(sender, players)
+
     handler = COMMANDS.get(cmd)
     if not handler:
         return f"❓ Unbekanntes Kommando: {cmd}"
 
-    if cmd in ("!pause", "!status", "!session0", "!charakter") and not adventure_folder:
+    # Zugriffscheck
+    if cmd not in PLAYER_COMMANDS and not is_admin:
+        logger.warning(f"Kommando {cmd} von {sender} verweigert (kein Admin)")
+        return None
+
+    if cmd in NEEDS_ADVENTURE and not adventure_folder:
         return "❌ Kein aktives Abenteuer gefunden."
 
     return handler(
@@ -230,13 +274,15 @@ def process_message(msg: dict, players: dict, registered_groups: set):
         adventure_folder = session_manager.get_adventure_for_player(sender)
         reply_to = sender
 
+    # Unbekannte Nummern still ignorieren
+    if not is_registered_player(sender, players) and sender != ADMIN_PHONE_NUMBER:
+        logger.debug(f"Unbekannte Nummer ignoriert: {sender}")
+        return
+
     logger.info(f"[{adventure_folder or '?'}] {sender_name}: {text}")
 
-    # !Kommandos — nur vom Admin
+    # !Kommandos
     if text.startswith("!"):
-        if sender != ADMIN_PHONE_NUMBER:
-            logger.warning(f"Kommando von unbekannter Nummer ignoriert: {sender}")
-            return
         response = handle_command(text, sender, adventure_folder, reply_to, players)
         if response:
             signal_client.send(reply_to, response)
@@ -244,7 +290,7 @@ def process_message(msg: dict, players: dict, registered_groups: set):
 
     # Kein Abenteuer → ignorieren
     if not adventure_folder:
-        logger.warning(f"Kein Abenteuer für {sender_name} ({sender}) — ignoriert")
+        logger.debug(f"Kein Abenteuer für {sender_name} — ignoriert")
         return
 
     # DM antworten lassen
