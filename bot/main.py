@@ -273,6 +273,10 @@ def cmd_usage(**_) -> str:
     return usage_tracker.get_summary()
 
 
+def cmd_zeigmal(adventure_folder: str, reply_to: str, **_) -> None:
+    generate_avatar.generate_scene_image(adventure_folder, reply_to)
+
+
 def cmd_pause(adventure_folder: str, **_) -> str:
     dm_engine.compress_session(adventure_folder, detailed=True)
     dm_engine.clear_history(adventure_folder)
@@ -582,6 +586,7 @@ def cmd_help(sender: str, **_) -> str:
             "!spiele — alle Abenteuer anzeigen",
             "!spiel <name> — Zusammenfassung eines Abenteuers",
             "!usage — API-Nutzung & geschätzte Kosten anzeigen",
+            "!zeigmal — atmosphärisches Szenen-Bild generieren & schicken",
         ]
 
     return "\n".join(lines)
@@ -737,9 +742,10 @@ COMMANDS = {
     "!spiele":    cmd_spiele,
     "!spiel":     cmd_spiel,
     "!usage":     cmd_usage,
+    "!zeigmal":   cmd_zeigmal,
 }
 
-NEEDS_ADVENTURE = {"!pause", "!status", "!session0", "!avatar"}
+NEEDS_ADVENTURE = {"!pause", "!status", "!session0", "!avatar", "!zeigmal"}
 
 
 def handle_command(text: str, sender: str, adventure_folder: str | None,

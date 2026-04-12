@@ -1,24 +1,26 @@
 """
-Avatar-Generierung via Google Gemini Imagen.
-Wird nach Session 0 aufgerufen — generiert ein Portrait-PNG pro Charakter
-und schickt es als Signal-Attachment in die Gruppe.
+Avatar- und Szenen-Bild-Generierung via Google Gemini Imagen.
+Avatare: Portrait-PNG pro Charakter nach Session 0.
+Szenen-Bilder: atmosphärisches 16:9-Bild der aktuellen Spielszene (!zeigmal).
 """
 
 import logging
 from pathlib import Path
 
+import anthropic
 import vertexai
 from vertexai.preview.vision_models import ImageGenerationModel
 
 import session_manager
 import signal_client
 import usage_tracker
-from config import GCP_PROJECT, GCP_LOCATION, TTRPG_PATH
+from config import GCP_PROJECT, GCP_LOCATION, TTRPG_PATH, ANTHROPIC_API_KEY
 
 logger = logging.getLogger(__name__)
 
 TTRPG = Path(TTRPG_PATH)
 IMAGEN_MODEL = "imagen-4.0-fast-generate-001"
+_claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 
 def _get_portrait_prompt(adventure_folder: str, char_name: str) -> str | None:
@@ -46,6 +48,20 @@ def _get_portrait_prompt(adventure_folder: str, char_name: str) -> str | None:
     return None
 
 
+def _run_imagen(prompt: str, output_path: Path, aspect_ratio: str = "1:1") -> bool:
+    """Ruft Imagen auf, speichert das Bild, trackt die Nutzung. Gibt True bei Erfolg zurück."""
+    try:
+        vertexai.init(project=GCP_PROJECT, location=GCP_LOCATION)
+        model = ImageGenerationModel.from_pretrained(IMAGEN_MODEL)
+        images = model.generate_images(prompt=prompt, number_of_images=1, aspect_ratio=aspect_ratio)
+        images[0].save(str(output_path))
+        usage_tracker.track_imagen(1)
+        return True
+    except Exception as e:
+        logger.error(f"Vertex AI Fehler ({output_path.name}): {e}")
+        return False
+
+
 def generate_avatar(adventure_folder: str, char_name: str) -> Path | None:
     """
     Generiert ein Avatar-PNG für einen Charakter via Gemini Imagen.
@@ -62,18 +78,10 @@ def generate_avatar(adventure_folder: str, char_name: str) -> Path | None:
         / f"{char_name.lower().replace(' ', '_')}_avatar.png"
     )
 
-    try:
-        vertexai.init(project=GCP_PROJECT, location=GCP_LOCATION)
-        model = ImageGenerationModel.from_pretrained(IMAGEN_MODEL)
-        images = model.generate_images(prompt=prompt, number_of_images=1, aspect_ratio="1:1")
-        images[0].save(str(output_path))
-        usage_tracker.track_imagen(1)
+    if _run_imagen(prompt, output_path, aspect_ratio="1:1"):
         logger.info(f"Avatar generiert: {output_path}")
         return output_path
-
-    except Exception as e:
-        logger.error(f"Vertex AI Fehler für {char_name}: {e}")
-        return None
+    return None
 
 
 def generate_and_send_avatars(adventure_folder: str, reply_to: str,
@@ -115,3 +123,107 @@ def generate_and_send_avatars(adventure_folder: str, reply_to: str,
         signal_client.send_file(reply_to, str(avatar_path), f"🧙 {char_name}")
     else:
         signal_client.send(reply_to, f"⚠️ Avatar für {char_name} konnte nicht generiert werden.")
+
+
+# ── Szenen-Bild (!zeigmal) ────────────────────────────────────────────────────
+
+def _build_scene_imagen_prompt(adventure_folder: str) -> str | None:
+    """
+    Fragt Claude nach einem englischen Imagen-Prompt für die aktuelle Szene.
+    Bezieht Ort, Szenenbeschreibung, Setting-Atmosphäre und Charakteraussehen ein.
+    Nur Charaktere mit vorhandenem Avatar werden erwähnt.
+    """
+    session = session_manager.load_session(adventure_folder)
+    setting = session_manager.load_setting(adventure_folder)
+
+    ort = session.get("aktueller_ort", "")
+    szene = session.get("letzte_szene", "")
+    ereignisse = session.get("letzte_ereignisse", [])
+
+    welt = setting.get("welt", {})
+    welt_name = welt.get("name", "")
+    welt_beschreibung = welt.get("beschreibung", "")
+    welt_stimmung = welt.get("stimmung", "")  # falls im Setting vorhanden
+
+    # Charaktere mit vorhandenem Avatar
+    chars_dir = TTRPG / "adventures" / adventure_folder / "characters"
+    char_descriptions = []
+    for char in session_manager.load_characters(adventure_folder):
+        name = char.get("charakter", {}).get("name", "")
+        if not name:
+            continue
+        slug = name.lower().replace(" ", "_")
+        if not (chars_dir / f"{slug}_avatar.png").exists():
+            continue
+        # Aussehen aus identitaet.aussehen oder imagen_prompt ableiten
+        aussehen = char.get("identitaet", {}).get("aussehen", "")
+        char_descriptions.append(f"- {name}: {aussehen}" if aussehen else f"- {name}")
+
+    # Zusammenbau des Kontext-Textes für Claude
+    kontext_parts = []
+    if welt_name:
+        kontext_parts.append(f"World: {welt_name}")
+    if welt_beschreibung:
+        kontext_parts.append(f"Setting: {welt_beschreibung}")
+    if welt_stimmung:
+        kontext_parts.append(f"Atmosphere: {welt_stimmung}")
+    if ort:
+        kontext_parts.append(f"Current location: {ort}")
+    if szene:
+        kontext_parts.append(f"Current scene: {szene}")
+    if ereignisse:
+        kontext_parts.append("Recent events: " + " | ".join(ereignisse))
+    if char_descriptions:
+        kontext_parts.append("Characters present:\n" + "\n".join(char_descriptions))
+
+    if not kontext_parts:
+        return None
+
+    prompt = (
+        "You are writing a prompt for an AI image generator (Imagen 4). "
+        "Based on the TTRPG scene below, write a single detailed English image prompt. "
+        "The image should be atmospheric, cinematic, wide-angle (16:9). "
+        "Include the characters in the scene if their appearance is described. "
+        "Focus on mood, lighting, environment, and visual storytelling. "
+        "Return ONLY the image prompt — no explanation, no quotes.\n\n"
+        + "\n".join(kontext_parts)
+    )
+
+    try:
+        response = _claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        usage_tracker.track_anthropic(
+            response.usage.input_tokens, response.usage.output_tokens,
+            getattr(response.usage, "cache_read_input_tokens", 0),
+            getattr(response.usage, "cache_creation_input_tokens", 0),
+        )
+        return response.content[0].text.strip()
+    except Exception as e:
+        logger.error(f"Szenen-Prompt Generierung fehlgeschlagen: {e}")
+        return None
+
+
+def generate_scene_image(adventure_folder: str, reply_to: str) -> None:
+    """
+    !zeigmal — generiert ein atmosphärisches 16:9-Szenenbild und schickt es in die Gruppe.
+    """
+    signal_client.send(reply_to, "🎨 Generiere Szenen-Bild... einen Moment!")
+
+    imagen_prompt = _build_scene_imagen_prompt(adventure_folder)
+    if not imagen_prompt:
+        signal_client.send(reply_to, "⚠️ Keine Szenen-Informationen verfügbar.")
+        return
+
+    logger.info(f"[{adventure_folder}] Szenen-Prompt: {imagen_prompt[:120]}...")
+
+    output_path = TTRPG / "adventures" / adventure_folder / "_scene_current.png"
+    if _run_imagen(imagen_prompt, output_path, aspect_ratio="16:9"):
+        logger.info(f"[{adventure_folder}] Szenen-Bild gespeichert: {output_path}")
+        session = session_manager.load_session(adventure_folder)
+        caption = session.get("aktueller_ort") or "Aktuelle Szene"
+        signal_client.send_file(reply_to, str(output_path), caption)
+    else:
+        signal_client.send(reply_to, "⚠️ Bild konnte nicht generiert werden.")
