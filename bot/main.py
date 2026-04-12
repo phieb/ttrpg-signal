@@ -555,9 +555,19 @@ def cmd_help(sender: str, **_) -> str:
     return "\n".join(lines)
 
 
-def cmd_avatar(args: list, adventure_folder: str, reply_to: str, **_) -> None:
-    """!avatar → Liste | !avatar <name> → Avatar generieren."""
-    char_name = " ".join(args) if args else None
+def cmd_avatar(sender: str, args: list, players: dict, adventure_folder: str, reply_to: str, **_) -> None:
+    """Im Gruppenchat: direkt den eigenen Charakter generieren/anzeigen."""
+    if args:
+        char_name = " ".join(args)
+    else:
+        # Eigenen Charakter im Abenteuer ermitteln
+        player_name = signal_client.get_sender_name(sender, players)
+        char = session_manager.get_character_for_player(adventure_folder, player_name)
+        char_name = char.get("charakter", {}).get("name") if char else None
+        if not char_name:
+            signal_client.send(reply_to, f"❌ Kein Charakter für {player_name} in diesem Abenteuer gefunden.")
+            return None
+
     generate_avatar.generate_and_send_avatars(adventure_folder, reply_to, char_name)
     return None
 
