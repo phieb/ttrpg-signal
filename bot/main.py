@@ -237,7 +237,7 @@ def is_registered_player(sender: str, players: dict) -> bool:
     return sender in players
 
 # Kommandos die jeder registrierte Spieler nutzen kann
-PLAYER_COMMANDS = {"!help", "!charakter"}
+PLAYER_COMMANDS = {"!help", "!charakter", "!avatar"}
 
 
 # ── Kommandos ─────────────────────────────────────────────────────────────────
@@ -545,7 +545,7 @@ def cmd_help(sender: str, **_) -> str:
             "!neu [name] — neues Abenteuer anlegen",
             "!session0 — Session 0 starten",
             "!dm @Spieler [text] — geheime 1:1 Nachricht",
-            "!avatare — Charakter-Portraits generieren",
+            "!avatar — Charakter-Portraits generieren",
             "!invite +43... Name — neuen Spieler registrieren",
             "!spieler — alle registrierten Spieler anzeigen",
             "!spiele — alle Abenteuer anzeigen",
@@ -555,8 +555,8 @@ def cmd_help(sender: str, **_) -> str:
     return "\n".join(lines)
 
 
-def cmd_avatare(args: list, adventure_folder: str, reply_to: str, **_) -> None:
-    """!avatare → Liste | !avatare <name> → Avatar generieren."""
+def cmd_avatar(args: list, adventure_folder: str, reply_to: str, **_) -> None:
+    """!avatar → Liste | !avatar <name> → Avatar generieren."""
     char_name = " ".join(args) if args else None
     generate_avatar.generate_and_send_avatars(adventure_folder, reply_to, char_name)
     return None
@@ -688,7 +688,7 @@ COMMANDS = {
     "!session0":  cmd_session0,
     "!dm":        cmd_dm,
     "!charakter": cmd_charakter,
-    "!avatare":   cmd_avatare,
+    "!avatar":   cmd_avatar,
     "!help":      cmd_help,
     "!invite":    cmd_invite,
     "!spieler":   cmd_spieler,
@@ -696,7 +696,7 @@ COMMANDS = {
     "!spiel":     cmd_spiel,
 }
 
-NEEDS_ADVENTURE = {"!pause", "!status", "!session0", "!avatare"}
+NEEDS_ADVENTURE = {"!pause", "!status", "!session0", "!avatar"}
 
 
 def handle_command(text: str, sender: str, adventure_folder: str | None,
