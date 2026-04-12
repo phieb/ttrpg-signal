@@ -223,10 +223,11 @@ def _load_session_text_from_log(adventure_folder: str) -> str:
     return "\n\n".join(lines)
 
 
-def compress_session(adventure_folder: str) -> None:
+def compress_session(adventure_folder: str, detailed: bool = False) -> None:
     """
-    Komprimiert session.yaml bei !pause.
-    Nutzt JSONL-Inhalt als Quelle wenn letzte_ereignisse leer ist.
+    Komprimiert session.yaml.
+    detailed=True (bei !pause): generiert zusätzlich 'wiederaufnahme' —
+    eine atmosphärische Zusammenfassung für den nächsten Session-Start.
     """
     session = session_manager.load_session(adventure_folder)
     letzte = session.get("letzte_ereignisse", [])
@@ -238,7 +239,6 @@ def compress_session(adventure_folder: str) -> None:
         if history:
             quelle += f"\n\nÄltere History:\n{json.dumps(history, ensure_ascii=False)}"
     else:
-        # Inhalt aus In-Memory-History oder JSONL
         mem = _history.get(adventure_folder, [])
         if mem:
             quelle = "Konversations-History:\n" + "\n".join(
@@ -252,6 +252,12 @@ def compress_session(adventure_folder: str) -> None:
             logger.info(f"[{adventure_folder}] Nichts zu komprimieren")
             return
 
+    wiederaufnahme_feld = (
+        '  "wiederaufnahme": "3-5 atmosphärische Sätze die den DM beim nächsten Start '
+        'direkt in die Szene holen — Stimmung, Spannung, offene Fäden, wo die Gruppe steht",\n'
+        if detailed else ""
+    )
+
     prompt = (
         "Du bist ein Archiv-Assistent für ein TTRPG-Abenteuer. "
         "Fasse den Spielverlauf kompakt zusammen — bewahre alle wichtigen Namen, "
@@ -260,6 +266,7 @@ def compress_session(adventure_folder: str) -> None:
         "{\n"
         '  "aktueller_ort": "Wo sind die Charaktere gerade",\n'
         '  "letzte_szene": "1-2 Sätze was zuletzt passiert ist",\n'
+        f"{wiederaufnahme_feld}"
         '  "letzte_ereignisse": ["Ereignis 1", "Ereignis 2", ...],\n'
         '  "history": ["Ältere Zusammenfassung 1", ...]\n'
         "}\n\n"
@@ -269,7 +276,7 @@ def compress_session(adventure_folder: str) -> None:
     try:
         response = client.messages.create(
             model=MODEL,
-            max_tokens=800,
+            max_tokens=1200 if detailed else 800,
             messages=[{"role": "user", "content": prompt}],
         )
         raw = response.content[0].text.strip()
@@ -281,6 +288,8 @@ def compress_session(adventure_folder: str) -> None:
         session["letzte_szene"] = data.get("letzte_szene", "")
         session["letzte_ereignisse"] = data.get("letzte_ereignisse", [])
         session["history"] = data.get("history", history)
+        if detailed and data.get("wiederaufnahme"):
+            session["wiederaufnahme"] = data["wiederaufnahme"]
         session_manager.save_session(adventure_folder, session)
         logger.info(f"[{adventure_folder}] Session komprimiert → {session['letzte_szene'][:60]}...")
 

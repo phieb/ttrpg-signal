@@ -49,6 +49,11 @@ _batch_deadline: dict[str, float] = {}   # folder → monotonic-Zeitstempel
 _batch_reply_to: dict[str, str] = {}     # folder → reply_to
 _batch_senders: dict[str, set[str]] = defaultdict(set)  # folder → Menge der Absender im aktuellen Batch
 
+# ── Auto-Compress nach Inaktivität ───────────────────────────────────────────
+AUTO_COMPRESS_SECONDS = 15 * 60  # 15 Minuten
+_last_activity: dict[str, float] = {}   # folder → letzter Nachrichten-Zeitstempel
+_auto_compressed: set[str] = set()      # Abenteuer die bereits auto-komprimiert wurden
+
 
 def _get_adventure_players(adventure_folder: str) -> set[str]:
     """Gibt die Menge der Spielernamen (lowercase) eines Abenteuers zurück."""
@@ -146,6 +151,10 @@ def _flush_batches() -> None:
         reply_to = _batch_reply_to.pop(folder)
         _batch_senders.pop(folder, None)
 
+        # Aktivität registrieren — setzt Auto-Compress-Timer zurück
+        _last_activity[folder] = now
+        _auto_compressed.discard(folder)
+
         # Mehrere Nachrichten zusammenfassen
         if len(messages) == 1:
             sender_name, text = messages[0]
@@ -188,6 +197,23 @@ def _flush_batches() -> None:
             _processing = False
             if not running:
                 raise SystemExit(0)
+
+    # Auto-Compress: session.yaml stille aktualisieren nach 15min Inaktivität
+    for folder, last in list(_last_activity.items()):
+        if folder in _auto_compressed:
+            continue
+        if folder in _batch_deadline:
+            continue  # Batch läuft noch
+        if now - last < AUTO_COMPRESS_SECONDS:
+            continue
+        if not dm_engine._history.get(folder):
+            continue  # Keine neue History seit letzter Pause
+        try:
+            dm_engine.compress_session(folder, detailed=False)
+            _auto_compressed.add(folder)
+            logger.info(f"[{folder}] Auto-Compress nach Inaktivität")
+        except Exception as e:
+            logger.warning(f"[{folder}] Auto-Compress fehlgeschlagen: {e}")
 
 
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
@@ -243,7 +269,7 @@ PLAYER_COMMANDS = {"!help", "!charakter", "!avatar"}
 # ── Kommandos ─────────────────────────────────────────────────────────────────
 
 def cmd_pause(adventure_folder: str, **_) -> str:
-    dm_engine.compress_session(adventure_folder)
+    dm_engine.compress_session(adventure_folder, detailed=True)
     dm_engine.clear_history(adventure_folder)
     return "⏸ Spielstand gespeichert. Bis zum nächsten Mal!"
 
@@ -800,6 +826,10 @@ def process_message(msg: dict, players: dict, registered_groups: set):
     _batch_senders[adventure_folder].add(sender_name.lower())
     _batch_deadline[adventure_folder] = time.monotonic() + BATCH_WINDOW_SECONDS
     _batch_reply_to[adventure_folder] = reply_to
+
+    # Activity-Tracking für Auto-Compress
+    _last_activity[adventure_folder] = time.monotonic()
+    _auto_compressed.discard(adventure_folder)
 
     # Sofort verarbeiten wenn alle Spieler des Abenteuers geantwortet haben
     expected = _get_adventure_players(adventure_folder)

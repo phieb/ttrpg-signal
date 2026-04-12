@@ -301,6 +301,10 @@ def build_context(adventure_folder: str) -> str:
         if szene_text:
             lines.append(szene_text)
 
+        wiederaufnahme = session.get("wiederaufnahme", "")
+        if wiederaufnahme:
+            lines.append(f"\n*Wiederaufnahme-Notiz:* {wiederaufnahme}")
+
         # Offene Fäden (altes Format)
         faeden = session.get("aktuelle_szene", {}).get("offene_faeden", [])
         if faeden:
