@@ -59,6 +59,27 @@ def send(recipient: str, message: str) -> bool:
         return False
 
 
+def send_file(recipient: str, file_path: str, caption: str = "") -> bool:
+    """Sendet eine Datei (z.B. Avatar-PNG) als Signal-Attachment."""
+    try:
+        with open(file_path, "rb") as f:
+            import base64
+            data = base64.b64encode(f.read()).decode()
+
+        payload = {
+            "message": caption,
+            "number": SIGNAL_PHONE_NUMBER,
+            "recipients": [recipient],
+            "base64_attachments": [data],
+        }
+        r = requests.post(f"{SIGNAL_CLI_URL}/v2/send", json=payload, timeout=30)
+        r.raise_for_status()
+        return True
+    except Exception as e:
+        logger.error(f"Fehler beim Senden von {file_path} an {recipient}: {e}")
+        return False
+
+
 def mark_read(sender: str, timestamp: int) -> None:
     """Markiert eine Nachricht als gelesen."""
     try:

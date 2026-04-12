@@ -8,6 +8,7 @@ from pathlib import Path
 import signal_client
 import session_manager
 import dm_engine
+import generate_avatar
 from config import SIGNAL_PHONE_NUMBER, ADMIN_PHONE_NUMBER, TTRPG_PATH, RESPONSE_DELAY_SECONDS
 
 logging.basicConfig(
@@ -140,6 +141,12 @@ def cmd_dm(args: list, **_) -> str:
     return f"✅ Nachricht an {spieler_name} gesendet."
 
 
+def cmd_avatare(adventure_folder: str, reply_to: str, **_) -> None:
+    """Generiert Avatare für alle Charaktere via Gemini Imagen."""
+    generate_avatar.generate_and_send_avatars(adventure_folder, reply_to)
+    return None  # generate_and_send_avatars schickt selbst
+
+
 def cmd_charakter(sender: str, adventure_folder: str, players: dict, **_) -> str:
     """Zeigt das Charakterblatt des Absenders."""
     player_name = signal_client.get_sender_name(sender, players)
@@ -174,6 +181,7 @@ COMMANDS = {
     "!session0":  cmd_session0,
     "!dm":        cmd_dm,
     "!charakter": cmd_charakter,
+    "!avatare":   cmd_avatare,
 }
 
 

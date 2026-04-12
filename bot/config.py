@@ -6,6 +6,9 @@ load_dotenv()
 # Claude API
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
+# Google Gemini (Imagen)
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+
 # Signal
 SIGNAL_CLI_URL = os.getenv("SIGNAL_CLI_URL", "http://signal-cli:8080")
 SIGNAL_PHONE_NUMBER = os.getenv("SIGNAL_PHONE_NUMBER", "")
