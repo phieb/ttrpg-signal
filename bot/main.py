@@ -533,6 +533,7 @@ def cmd_help(sender: str, **_) -> str:
 
     lines += [
         "!charakter — dein Charakterblatt anzeigen",
+        "!avatar — dein Portrait anzeigen / generieren",
         "!help — diese Hilfe",
     ]
 
@@ -545,7 +546,6 @@ def cmd_help(sender: str, **_) -> str:
             "!neu [name] — neues Abenteuer anlegen",
             "!session0 — Session 0 starten",
             "!dm @Spieler [text] — geheime 1:1 Nachricht",
-            "!avatar — Charakter-Portraits generieren",
             "!invite +43... Name — neuen Spieler registrieren",
             "!spieler — alle registrierten Spieler anzeigen",
             "!spiele — alle Abenteuer anzeigen",
