@@ -180,18 +180,11 @@ def cmd_avatare(adventure_folder: str, reply_to: str, **_) -> None:
     return None  # generate_and_send_avatars schickt selbst
 
 
-def cmd_charakter(sender: str, adventure_folder: str, players: dict, **_) -> str:
-    """Zeigt das Charakterblatt des Absenders."""
-    player_name = signal_client.get_sender_name(sender, players)
-    char = session_manager.get_character_for_player(adventure_folder, player_name)
-    if not char:
-        return f"❌ Kein Charakter für {player_name} in diesem Abenteuer gefunden."
-
+def _format_charakter(char: dict) -> str:
     c = char.get("charakter", {})
     ident = char.get("identitaet", {})
     skills = char.get("skills", [])
     mot = char.get("motivation", {})
-
     lines = [
         f"🎭 *{c.get('name', '?')}*",
         f"_{ident.get('wer_bist_du', '')}_",
@@ -202,6 +195,40 @@ def cmd_charakter(sender: str, adventure_folder: str, players: dict, **_) -> str
         f"*Will:* {mot.get('will', '—')}",
         f"*Fürchtet:* {mot.get('fuerchtet', '—')}",
     ]
+    return "\n".join(lines)
+
+
+def cmd_charakter(sender: str, args: list, players: dict, **_) -> str:
+    """
+    !charakter         → alle eigenen Charaktere, oder direkt anzeigen wenn nur einer
+    !charakter <name>  → bestimmten Charakter anzeigen
+    """
+    player_name = signal_client.get_sender_name(sender, players)
+    all_chars = session_manager.get_all_characters_for_player(player_name)
+
+    if not all_chars:
+        return f"❌ Keine Charaktere für {player_name} gefunden."
+
+    # Mit Name-Argument: direkt anzeigen
+    if args:
+        char_name = " ".join(args)
+        char = session_manager.find_character_by_name(player_name, char_name)
+        if not char:
+            names = ", ".join(e["char"]["charakter"]["name"] for e in all_chars)
+            return f"❌ Charakter '{char_name}' nicht gefunden.\nDeine Charaktere: {names}"
+        return _format_charakter(char)
+
+    # Nur ein Charakter → direkt anzeigen
+    if len(all_chars) == 1:
+        return _format_charakter(all_chars[0]["char"])
+
+    # Mehrere → Liste zurückgeben
+    lines = [f"*{player_name}s Charaktere:*", ""]
+    for entry in all_chars:
+        name = entry["char"].get("charakter", {}).get("name", "?")
+        abenteuer = entry["abenteuer"].replace("_", " ").title()
+        lines.append(f"• *{name}* _{abenteuer}_")
+    lines += ["", "Tippe _!charakter <name>_ um einen anzuzeigen."]
     return "\n".join(lines)
 
 
@@ -218,7 +245,7 @@ COMMANDS = {
     "!help":      cmd_help,
 }
 
-NEEDS_ADVENTURE = {"!pause", "!status", "!session0", "!charakter", "!avatare"}
+NEEDS_ADVENTURE = {"!pause", "!status", "!session0", "!avatare"}
 
 
 def handle_command(text: str, sender: str, adventure_folder: str | None,

@@ -93,10 +93,39 @@ def load_characters(adventure_folder: str) -> list[dict]:
 
 
 def get_character_for_player(adventure_folder: str, player_name: str) -> dict | None:
-    """Gibt den Charakter eines Spielers anhand seines Namens zurück."""
+    """Gibt den Charakter eines Spielers in einem bestimmten Abenteuer zurück."""
     for char in load_characters(adventure_folder):
         if char.get("charakter", {}).get("gespielt_von", "").lower() == player_name.lower():
             return char
+    return None
+
+
+def get_all_characters_for_player(player_name: str) -> list[dict]:
+    """
+    Sucht alle Charaktere eines Spielers über alle Abenteuer.
+    Gibt Liste von dicts zurück: {"char": {...}, "abenteuer": "ordner"}
+    """
+    results = []
+    adventures_dir = TTRPG / "adventures"
+    for adventure_path in sorted(adventures_dir.iterdir()):
+        if not adventure_path.is_dir() or adventure_path.name.startswith("_"):
+            continue
+        chars_dir = adventure_path / "characters"
+        if not chars_dir.exists():
+            continue
+        for f in sorted(chars_dir.glob("*.yaml")):
+            char = _load_yaml(f)
+            if char.get("charakter", {}).get("gespielt_von", "").lower() == player_name.lower():
+                results.append({"char": char, "abenteuer": adventure_path.name})
+    return results
+
+
+def find_character_by_name(player_name: str, char_name: str) -> dict | None:
+    """Sucht einen Charakter über alle Abenteuer anhand des Charakternamens."""
+    for entry in get_all_characters_for_player(player_name):
+        if entry["char"].get("charakter", {}).get("name", "").lower() == char_name.lower():
+            return entry["char"]
+    return None
     return None
 
 
