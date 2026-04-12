@@ -171,6 +171,8 @@ Der Bot finalisiert Session 0 automatisch sobald alle Charakterblätter vollstä
 | `!spieler` | Alle registrierten Spieler mit Nummer und Rolle anzeigen |
 | `!spiele` | Alle Abenteuer mit Status und letztem Spieltag anzeigen |
 | `!spiel <name>` | Zusammenfassung eines Abenteuers (Setting, Spieler, Charaktere, letzte Szene) |
+| `!zeigmal [Idee]` | Atmosphärisches Szenen-Bild generieren und schicken — optionale Idee fließt als Inspiration ein |
+| `!usage` | API-Nutzung & geschätzte Kosten anzeigen (Anthropic + Vertex AI) |
 
 ---
 
