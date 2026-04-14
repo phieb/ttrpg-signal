@@ -330,7 +330,9 @@ def cmd_neu(args: list, reply_to: str, **_) -> str:
     # Spieler-Telefonnummern auflösen
     not_found = []
     spieler_eintraege = []
-    member_phones = [ADMIN_PHONE_NUMBER]  # Admin immer dabei
+    # Bot-Nummer + Admin immer dabei — Bot muss explizit rein damit signal-cli
+    # die Gruppe auch bei nur einem weiteren Mitglied (Solo-Abenteuer) akzeptiert
+    member_phones = list({SIGNAL_PHONE_NUMBER, ADMIN_PHONE_NUMBER})
 
     for sname in spieler_namen:
         telefon = find_player_phone(sname)
