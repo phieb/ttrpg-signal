@@ -249,6 +249,11 @@ def load_setting(adventure_folder: str) -> dict:
     return _load_yaml(TTRPG / "adventures" / adventure_folder / "setting.yaml")
 
 
+def load_flags(adventure_folder: str) -> dict:
+    """Gibt das flags-Dict aus setting.yaml zurück (leer falls keine gesetzt)."""
+    return load_setting(adventure_folder).get("flags", {})
+
+
 def load_npcs(adventure_folder: str) -> dict:
     return _load_yaml(TTRPG / "adventures" / adventure_folder / "npcs.yaml")
 
@@ -258,6 +263,23 @@ def load_npcs(adventure_folder: str) -> dict:
 def build_context(adventure_folder: str) -> str:
     """Baut einen kompakten Kontext-String für die Claude API zusammen."""
     lines = []
+
+    # Spieler-Liste — immer zuerst, damit der DM nie Spieler mit NSCs verwechselt
+    characters = load_characters(adventure_folder)
+    if characters:
+        spieler_lines = []
+        for char in characters:
+            c = char.get("charakter", {})
+            spieler = c.get("gespielt_von", "")
+            char_name = c.get("name", "")
+            if spieler and char_name:
+                spieler_lines.append(f"- {spieler} → spielt {char_name}")
+            elif spieler:
+                spieler_lines.append(f"- {spieler}")
+        if spieler_lines:
+            lines.append("## Spieler (echte Menschen — niemals für sie handeln oder sprechen)")
+            lines.extend(spieler_lines)
+            lines.append("")
 
     # Setting
     setting = load_setting(adventure_folder)
@@ -270,8 +292,7 @@ def build_context(adventure_folder: str) -> str:
         if welt.get("gefahr"):
             lines.append(f"Gefahr: {welt['gefahr']}")
 
-    # Charaktere
-    characters = load_characters(adventure_folder)
+    # Charaktere (details)
     if characters:
         lines.append("\n## Charaktere")
         for char in characters:

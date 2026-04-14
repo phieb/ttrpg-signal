@@ -36,12 +36,39 @@ def _load_dm_prompt() -> str:
         return "Du bist ein Dungeon Master. Führe die Spieler durch ein Abenteuer."
 
 
+def _load_top_rules() -> str:
+    """Lädt die TOP_DM_REGELN — kurze Erinnerung die bei jeder Antwort aktiv bleibt."""
+    path = TTRPG / "_engine" / "TOP_DM_REGELN.md"
+    try:
+        return path.read_text()
+    except Exception as e:
+        logger.warning(f"TOP_DM_REGELN.md konnte nicht geladen werden: {e}")
+        return ""
+
+
+def _load_flag_prompts(adventure_folder: str) -> str:
+    """Lädt alle aktiven Flag-Prompts und gibt sie kombiniert zurück."""
+    flags = session_manager.load_flags(adventure_folder)
+    flags_dir = TTRPG / "_engine" / "flags"
+    parts = []
+    for flag, enabled in flags.items():
+        if enabled:
+            prompt_path = flags_dir / f"{flag}.md"
+            try:
+                parts.append(prompt_path.read_text())
+            except FileNotFoundError:
+                logger.warning(f"Flag-Prompt nicht gefunden: {prompt_path}")
+    return "\n\n".join(parts)
+
+
 def _build_system(adventure_folder: str) -> list:
     """Baut die system-Blöcke auf — DM-Prompt + statische Anweisungen gecacht, Kontext frisch."""
     dm_prompt = _load_dm_prompt()
+    flag_prompts = _load_flag_prompts(adventure_folder)
     context = session_manager.build_context(adventure_folder)
+    top_rules = _load_top_rules()
 
-    static_instructions = (
+    signal_instructions = (
         "\n\n---\n\n"
         "## WICHTIG — Technischer Kontext\n\n"
         "Du läufst als Signal-Bot. Du hast KEINEN direkten Dateizugriff. "
@@ -56,27 +83,30 @@ def _build_system(adventure_folder: str) -> list:
         "- Emojis sparsam einsetzen, nur wenn sie zur Atmosphäre passen"
     )
 
+    # Cached block: DM-Prompt + Signal-Anweisungen + Flag-Prompts (alle stabil pro Session)
+    cached_text = dm_prompt + signal_instructions
+    if flag_prompts:
+        cached_text += "\n\n" + flag_prompts
+
+    # Dynamic block: TOP_DM_REGELN (frisch bei jeder Antwort) + aktueller Spielstand
+    dynamic_parts = []
+    if top_rules:
+        dynamic_parts.append(top_rules)
+    dynamic_parts.append(f"## Aktueller Spielstand\n\n{context}")
+
     return [
         {
             "type": "text",
-            # DM-Prompt + statische Anweisungen zusammen cachen — maximiert den gecachten Block
+            # DM-Prompt + Signal-Anweisungen + Flag-Prompts zusammen cachen.
             # (Haiku benötigt ≥2048 Tokens; kombiniert deutlich über der Schwelle)
-            "text": dm_prompt + static_instructions,
+            "text": cached_text,
             "cache_control": {"type": "ephemeral"},
         },
         {
             "type": "text",
-            # Nur der dynamische Spielstand bleibt uncached (ändert sich jede Runde).
-            # Die ERINNERUNG steht hier damit sie auch in langen Sessions "frisch" bleibt
-            # und nicht im gecachten Block vergraben wird.
-            "text": (
-                "\n\n⚠️ ERINNERUNG (gilt die gesamte Session):\n"
-                "Du spielst NIEMALS Spielercharaktere. "
-                "Kein Spielercharakter handelt, spricht oder entscheidet in deinem Text — "
-                "nur die Welt, NSCs und Atmosphäre. "
-                "Jede Antwort endet mit einer offenen Frage an die Gruppe.\n\n"
-                f"## Aktueller Spielstand\n\n{context}"
-            ),
+            # TOP_DM_REGELN + Spielstand bleiben uncached — die Regeln bleiben so bei
+            # jeder Antwort frisch im Vordergrund, der Spielstand ändert sich jede Runde.
+            "text": "\n\n".join(dynamic_parts),
         },
     ]
 
