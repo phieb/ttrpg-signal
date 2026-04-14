@@ -233,6 +233,6 @@ ttrpg/                         ← separates Repo, eingebunden via TTRPG_PATH
 cd /pfad/zu/ttrpg-signal
 git pull
 cd /pfad/zu/deployment-ordner
-docker compose build --no-cache ttrpg-bot
+docker compose build ttrpg-bot
 docker compose up -d ttrpg-bot
 ```
