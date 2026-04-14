@@ -867,11 +867,12 @@ def process_message(msg: dict, players: dict, registered_groups: set):
     _last_activity[adventure_folder] = time.monotonic()
     _auto_compressed.discard(adventure_folder)
 
-    # Sofort verarbeiten wenn alle Spieler des Abenteuers geantwortet haben
+    # Sofort verarbeiten wenn: Solo-Abenteuer (1 Spieler) oder alle Spieler geantwortet haben
     expected = _get_adventure_players(adventure_folder)
-    if expected and _batch_senders[adventure_folder] >= expected:
+    if expected and (len(expected) == 1 or _batch_senders[adventure_folder] >= expected):
         _batch_deadline[adventure_folder] = 0
-        logger.info(f"[{adventure_folder}] Alle Spieler haben geantwortet — sofortige Verarbeitung")
+        reason = "Solo-Abenteuer" if len(expected) == 1 else "alle Spieler haben geantwortet"
+        logger.info(f"[{adventure_folder}] {reason} — sofortige Verarbeitung")
     else:
         count = len(_batch_messages[adventure_folder])
         logger.info(f"[{adventure_folder}] Gepuffert ({count} Nachricht{'en' if count > 1 else ''}), DM antwortet in ~{BATCH_WINDOW_SECONDS}s")
