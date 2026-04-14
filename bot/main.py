@@ -305,9 +305,11 @@ def cmd_neu(args: list, reply_to: str, **_) -> str:
     flag_namen = []
     in_name = True
     for token in args:
-        if token.startswith("--"):
+        # Flags erkennen: -- oder Signal-Autokorrektur — oder –
+        stripped = token.lstrip("-–—")
+        if stripped != token and stripped:
             in_name = False
-            flag_namen.append(token[2:])
+            flag_namen.append(stripped.replace("-", "_"))
         elif token.startswith("@"):
             in_name = False
             spieler_namen.append(token.lstrip("@"))
