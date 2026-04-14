@@ -84,10 +84,14 @@ cp /pfad/zu/ttrpg/status.example.yaml /pfad/zu/ttrpg/status.yaml
 
 Spieler werden danach per `!invite` direkt über den Bot registriert.
 
-### 6. `docker-compose.yml` anlegen
+### 6. Repos klonen und `docker-compose.yml` anlegen
 
-Der Bot wird direkt von GitHub gebaut — kein lokaler Clone des Bot-Repos nötig.
+Da das Repo privat ist, muss es lokal geklont sein — Docker baut direkt aus dem lokalen Ordner.
 `.env` und `gcp-sa.json` liegen im selben Ordner wie die `docker-compose.yml`.
+
+```bash
+git clone https://github.com/phieb/ttrpg-signal.git /pfad/zu/ttrpg-signal
+```
 
 ```yaml
 services:
@@ -104,7 +108,7 @@ services:
       - ./signal-cli-data:/home/.local/share/signal-cli
 
   ttrpg-bot:
-    build: https://github.com/phieb/ttrpg-signal.git
+    build: /pfad/zu/ttrpg-signal          # lokaler Clone des privaten Repos
     container_name: ttrpg-bot
     restart: unless-stopped
     depends_on:
@@ -225,9 +229,9 @@ ttrpg/                         ← separates Repo, eingebunden via TTRPG_PATH
 
 ## Bot neu bauen (nach Code-Änderungen)
 
-Da der Build direkt von GitHub kommt, reicht ein `--no-cache` damit Docker den aktuellen Stand zieht:
-
 ```bash
+cd /pfad/zu/ttrpg-signal
+git pull
 cd /pfad/zu/deployment-ordner
 docker compose build --no-cache ttrpg-bot
 docker compose up -d ttrpg-bot
