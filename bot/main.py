@@ -297,19 +297,27 @@ def cmd_status(adventure_folder: str, **_) -> str:
 
 def cmd_neu(args: list, reply_to: str, **_) -> str:
     if not args:
-        return "Usage: !neu <abenteuer-name> [@Spieler1 @Spieler2 ...]"
+        return "Usage: !neu <abenteuer-name> [@Spieler1 ...] [--flag1 --flag2 ...]"
 
-    # Args aufteilen: alles vor dem ersten @-Token ist der Abenteuer-Name
+    # Args aufteilen: Name | @Spieler-Token | --flag-Token (Reihenfolge egal)
     name_parts = []
     spieler_namen = []
+    flag_namen = []
+    in_name = True
     for token in args:
-        if token.startswith("@") or spieler_namen:
+        if token.startswith("--"):
+            in_name = False
+            flag_namen.append(token[2:])
+        elif token.startswith("@"):
+            in_name = False
             spieler_namen.append(token.lstrip("@"))
-        else:
+        elif in_name:
             name_parts.append(token)
+        else:
+            spieler_namen.append(token)
 
     if not name_parts:
-        return "Usage: !neu <abenteuer-name> [@Spieler1 @Spieler2 ...]"
+        return "Usage: !neu <abenteuer-name> [@Spieler1 ...] [--flag1 --flag2 ...]"
 
     name = " ".join(name_parts).strip('"\'„"')
     ordner = name.lower().replace(" ", "_")
@@ -326,6 +334,16 @@ def cmd_neu(args: list, reply_to: str, **_) -> str:
         (adventure_path / "characters").mkdir(parents=True)
         for f in ["session.yaml", "setting.yaml", "npcs.yaml"]:
             (adventure_path / f).write_text("")
+
+    # Flags in setting.yaml schreiben
+    if flag_namen:
+        setting_path = adventure_path / "setting.yaml"
+        setting = yaml.safe_load(setting_path.read_text()) or {} if setting_path.exists() else {}
+        flags = setting.setdefault("flags", {})
+        for flag in flag_namen:
+            flags[flag] = True
+        setting_path.write_text(yaml.dump(setting, allow_unicode=True, default_flow_style=False))
+        logger.info(f"[{ordner}] Flags gesetzt: {flag_namen}")
 
     # Spieler-Telefonnummern auflösen
     not_found = []
@@ -581,7 +599,7 @@ def cmd_help(sender: str, **_) -> str:
             "**Admin:**",
             "!status — aktueller Spielstand",
             "!pause — Spielstand speichern & Session beenden",
-            "!neu [name] — neues Abenteuer anlegen",
+            "!neu [name] [@Spieler ...] [--flag ...] — neues Abenteuer anlegen",
             "!session0 — Session 0 starten",
             "!dm @Spieler [text] — geheime 1:1 Nachricht",
             "!invite +43... Name — neuen Spieler registrieren",
