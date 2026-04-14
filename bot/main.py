@@ -893,6 +893,11 @@ def main():
     logger.info(f"Registrierte Gruppen: {registered_groups or '(noch keine)'}")
 
     while running:
+        # Gruppen + Spieler bei jedem Durchlauf neu laden — neue Abenteuer/Spieler
+        # werden sonst erst nach einem Bot-Neustart erkannt
+        registered_groups = load_registered_groups()
+        players = signal_client.load_players()
+
         envelopes = signal_client.receive()
         for envelope in envelopes:
             msg = signal_client.extract_message(envelope)
