@@ -153,30 +153,30 @@ Der Bot finalisiert Session 0 automatisch sobald alle Charakterblätter vollstä
 
 ## Kommandos
 
-### Alle Spieler (1:1 oder Gruppe)
+### All players (1:1 or group)
 
-| Kommando | Beschreibung |
-|----------|-------------|
-| `!help` | Verfügbare Kommandos anzeigen |
-| `!charakter` | Eigenes Charakterblatt + PDF anzeigen (im Gruppenchat: Charakter des laufenden Abenteuers) |
-| `!charakter <name>` | Bestimmten Charakter nach Name suchen |
-| `!avatar` | Eigenes Portrait anzeigen / neu generieren (im Gruppenchat: direkt der eigene Charakter) |
+| Command | Description |
+|---------|-------------|
+| `!help` | Show available commands |
+| `!charakter` | Show your character sheet + PDF (in group: character for this adventure) |
+| `!charakter <name>` | Find a specific character by name |
+| `!avatar` | Show / regenerate your portrait |
 
-### Nur Admin
+### Admin only
 
-| Kommando | Beschreibung |
-|----------|-------------|
-| `!status` | Aktueller Spielstand (Ort, letzte Szene, Ereignisse) |
-| `!pause` | Spielstand per Claude komprimieren → session.yaml, Session beenden |
-| `!session0` | Session 0 starten — DM führt durch Charaktererstellung |
-| `!neu <name> [@Spieler1 @Spieler2 ...]` | Neues Abenteuer anlegen, Signal-Gruppe erstellen, Spieler einladen |
-| `!invite +43... Name` | Spieler registrieren (players/Name.yaml anlegen) + Willkommensnachricht schicken |
-| `!dm @Spieler <text>` | Geheime 1:1 Nachricht an einen Spieler |
-| `!spieler` | Alle registrierten Spieler mit Nummer und Rolle anzeigen |
-| `!spiele` | Alle Abenteuer mit Status und letztem Spieltag anzeigen |
-| `!spiel <name>` | Zusammenfassung eines Abenteuers (Setting, Spieler, Charaktere, letzte Szene) |
-| `!zeigmal [Idee]` | Atmosphärisches Szenen-Bild generieren und schicken — optionale Idee fließt als Inspiration ein |
-| `!usage` | API-Nutzung & geschätzte Kosten anzeigen (Anthropic + Vertex AI) |
+| Command | Description |
+|---------|-------------|
+| `!status` | Current game state (location, last scene, events) |
+| `!save` | Compress & save game state → session.yaml, end session |
+| `!session0` | Start Session 0 — DM leads world-building + intro scene |
+| `!new <name> [@Player1 @Player2 ...]` | Create adventure, Signal group, private setup channels per player |
+| `!invite +43... Name` | Register player (creates players/Name.yaml) + welcome message |
+| `!dm @Player <text>` | Secret 1:1 message to a player |
+| `!players` | List all registered players with number and role |
+| `!adventures` | List all adventures with status and last played date |
+| `!adventure <name>` | Summary of an adventure (setting, players, characters, last scene) |
+| `!showme [idea]` | Generate and send an atmospheric scene image — optional idea as inspiration |
+| `!usage` | API usage & estimated costs (Anthropic + Vertex AI) |
 
 ---
 

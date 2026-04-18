@@ -281,15 +281,15 @@ def cmd_usage(**_) -> str:
     return usage_tracker.get_summary()
 
 
-def cmd_zeigmal(adventure_folder: str, reply_to: str, args: list, **_) -> None:
+def cmd_showme(adventure_folder: str, reply_to: str, args: list, **_) -> None:
     hint = " ".join(args) if args else ""
     generate_avatar.generate_scene_image(adventure_folder, reply_to, hint=hint)
 
 
-def cmd_pause(adventure_folder: str, **_) -> str:
+def cmd_save(adventure_folder: str, **_) -> str:
     dm_engine.compress_session(adventure_folder, detailed=True)
     dm_engine.clear_history(adventure_folder)
-    return "⏸ Spielstand gespeichert. Bis zum nächsten Mal!"
+    return "💾 Saved. See you next time!"
 
 
 def cmd_status(adventure_folder: str, **_) -> str:
@@ -303,9 +303,9 @@ def cmd_status(adventure_folder: str, **_) -> str:
     return "\n".join(lines)
 
 
-def cmd_neu(args: list, reply_to: str, **_) -> str:
+def cmd_new(args: list, reply_to: str, **_) -> str:
     if not args:
-        return "Usage: !neu <abenteuer-name> [@Spieler1 ...] [--flag1 --flag2 ...]"
+        return "Usage: !new <adventure-name> [@Player1 ...] [--flag1 --flag2 ...]"
 
     # Args aufteilen: Name | @Spieler-Token | --flag-Token (Reihenfolge egal)
     name_parts = []
@@ -327,7 +327,7 @@ def cmd_neu(args: list, reply_to: str, **_) -> str:
             spieler_namen.append(token)
 
     if not name_parts:
-        return "Usage: !neu <abenteuer-name> [@Spieler1 ...] [--flag1 --flag2 ...]"
+        return "Usage: !new <adventure-name> [@Player1 ...] [--flag1 --flag2 ...]"
 
     name = " ".join(name_parts).strip('"\'„"')
     ordner = name.lower().replace(" ", "_")
@@ -464,8 +464,8 @@ def cmd_dm(args: list, **_) -> str:
     return f"✅ Nachricht an {spieler_name} gesendet."
 
 
-def cmd_spiele(**_) -> str:
-    """!spiele — alle Abenteuer mit Status anzeigen."""
+def cmd_adventures(**_) -> str:
+    """!adventures — alle Abenteuer mit Status anzeigen."""
     status_path = TTRPG / "status.yaml"
     data = yaml.safe_load(status_path.read_text()) or {}
     abenteuer = data.get("abenteuer", [])
@@ -493,10 +493,10 @@ def cmd_spiele(**_) -> str:
     return "\n".join(lines)
 
 
-def cmd_spiel(args: list, **_) -> str:
-    """!spiel <name> — Zusammenfassung eines Abenteuers."""
+def cmd_adventure(args: list, **_) -> str:
+    """!adventure <name> — Zusammenfassung eines Abenteuers."""
     if not args:
-        return "Usage: !spiel <abenteuer-name>"
+        return "Usage: !adventure <name>"
 
     suche = " ".join(args).lower()
     status_path = TTRPG / "status.yaml"
@@ -548,8 +548,8 @@ def cmd_spiel(args: list, **_) -> str:
     return "\n".join(lines)
 
 
-def cmd_spieler(**_) -> str:
-    """!spieler — alle registrierten Spieler anzeigen."""
+def cmd_players(**_) -> str:
+    """!players — alle registrierten Spieler anzeigen."""
     players_dir = TTRPG / "players"
     eintraege = []
     for f in sorted(players_dir.glob("*.yaml")):
@@ -617,26 +617,26 @@ def cmd_help(sender: str, **_) -> str:
     lines = ["**Verfügbare Kommandos:**", ""]
 
     lines += [
-        "!charakter — dein Charakterblatt anzeigen",
-        "!avatar — dein Portrait anzeigen / generieren",
-        "!help — diese Hilfe",
+        "!charakter — show your character sheet",
+        "!avatar — show / regenerate your portrait",
+        "!help — this help",
     ]
 
     if is_admin:
         lines += [
             "",
             "**Admin:**",
-            "!status — aktueller Spielstand",
-            "!pause — Spielstand speichern & Session beenden",
-            "!neu [name] [@Spieler ...] [--flag ...] — neues Abenteuer anlegen",
-            "!session0 — Session 0 starten",
-            "!dm @Spieler [text] — geheime 1:1 Nachricht",
-            "!invite +43... Name — neuen Spieler registrieren",
-            "!spieler — alle registrierten Spieler anzeigen",
-            "!spiele — alle Abenteuer anzeigen",
-            "!spiel <name> — Zusammenfassung eines Abenteuers",
-            "!usage — API-Nutzung & geschätzte Kosten anzeigen",
-            "!zeigmal [Idee] — atmosphärisches Szenen-Bild generieren & schicken",
+            "!status — current game state",
+            "!save — save game & end session",
+            "!new <name> [@Player ...] [--flag ...] — create new adventure",
+            "!session0 — start Session 0",
+            "!dm @Player [text] — secret 1:1 message to a player",
+            "!invite +43... Name — register new player",
+            "!players — list all registered players",
+            "!adventures — list all adventures",
+            "!adventure <name> — summary of an adventure",
+            "!usage — API usage & estimated costs",
+            "!showme [idea] — generate & send an atmospheric scene image",
         ]
 
     return "\n".join(lines)
@@ -771,7 +771,7 @@ def cmd_charakter(sender: str, args: list, players: dict, reply_to: str,
         name = entry["char"].get("charakter", {}).get("name", "?")
         abenteuer = entry["abenteuer"].replace("_", " ").title()
         lines.append(f"• **{name}** *{abenteuer}*")
-    lines += ["", "Tippe *!charakter <name>* um einen anzuzeigen."]
+    lines += ["", "Type *!charakter <name>* to show one."]
     signal_client.send(reply_to, "\n".join(lines))
     return None
 
@@ -779,23 +779,23 @@ def cmd_charakter(sender: str, args: list, players: dict, reply_to: str,
 # ── Kommando-Router ───────────────────────────────────────────────────────────
 
 COMMANDS = {
-    "!pause":     cmd_pause,
-    "!status":    cmd_status,
-    "!neu":       cmd_neu,
-    "!session0":  cmd_session0,
-    "!dm":        cmd_dm,
-    "!charakter": cmd_charakter,
-    "!avatar":    cmd_avatar,
-    "!help":      cmd_help,
-    "!invite":    cmd_invite,
-    "!spieler":   cmd_spieler,
-    "!spiele":    cmd_spiele,
-    "!spiel":     cmd_spiel,
-    "!usage":     cmd_usage,
-    "!zeigmal":   cmd_zeigmal,
+    "!save":        cmd_save,
+    "!status":      cmd_status,
+    "!new":         cmd_new,
+    "!session0":    cmd_session0,
+    "!dm":          cmd_dm,
+    "!charakter":   cmd_charakter,
+    "!avatar":      cmd_avatar,
+    "!help":        cmd_help,
+    "!invite":      cmd_invite,
+    "!players":     cmd_players,
+    "!adventures":  cmd_adventures,
+    "!adventure":   cmd_adventure,
+    "!usage":       cmd_usage,
+    "!showme":      cmd_showme,
 }
 
-NEEDS_ADVENTURE = {"!pause", "!status", "!session0", "!avatar", "!zeigmal"}
+NEEDS_ADVENTURE = {"!save", "!status", "!session0", "!avatar", "!showme"}
 
 
 def handle_command(text: str, sender: str, adventure_folder: str | None,
