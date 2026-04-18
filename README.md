@@ -158,6 +158,8 @@ Der Bot finalisiert Session 0 automatisch sobald alle Charakterblätter vollstä
 | Command | Description |
 |---------|-------------|
 | `!help` | Show available commands |
+| `!status` | In group: current adventure state. In DM: list your adventures |
+| `!status <name>` | In DM: details of a named adventure (own adventures only) |
 | `!charakter` | Show your character sheet + PDF (in group: character for this adventure) |
 | `!charakter <name>` | Find a specific character by name |
 | `!avatar` | Show / regenerate your portrait |
@@ -166,15 +168,12 @@ Der Bot finalisiert Session 0 automatisch sobald alle Charakterblätter vollstä
 
 | Command | Description |
 |---------|-------------|
-| `!status` | Current game state (location, last scene, events) |
 | `!save` | Compress & save game state → session.yaml, end session |
 | `!session0` | Start Session 0 — DM leads world-building + intro scene |
 | `!new <name> [@Player1 @Player2 ...]` | Create adventure, Signal group, private setup channels per player |
 | `!invite +43... Name` | Register player (creates players/Name.yaml) + welcome message |
 | `!dm @Player <text>` | Secret 1:1 message to a player |
 | `!players` | List all registered players with number and role |
-| `!adventures` | List all adventures with status and last played date |
-| `!adventure <name>` | Summary of an adventure (setting, players, characters, last scene) |
 | `!showme [idea]` | Generate and send an atmospheric scene image — optional idea as inspiration |
 | `!usage` | API usage & estimated costs (Anthropic + Vertex AI) |
 

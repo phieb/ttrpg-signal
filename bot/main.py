@@ -272,7 +272,7 @@ def is_registered_player(sender: str, players: dict) -> bool:
     return sender in players
 
 # Kommandos die jeder registrierte Spieler nutzen kann
-PLAYER_COMMANDS = {"!help", "!charakter", "!avatar"}
+PLAYER_COMMANDS = {"!help", "!charakter", "!avatar", "!status"}
 
 
 # ── Kommandos ─────────────────────────────────────────────────────────────────
@@ -292,7 +292,92 @@ def cmd_save(adventure_folder: str, **_) -> str:
     return "💾 Saved. See you next time!"
 
 
-def cmd_status(adventure_folder: str, **_) -> str:
+def cmd_status(args: list, sender: str, adventure_folder: str | None,
+               group_id: str | None, players: dict, **_) -> str:
+    """
+    !status            — in group chat: current state of this adventure
+    !status <name>     — in 1:1: details of a named adventure (own adventures only, or admin)
+    """
+    is_admin = sender == ADMIN_PHONE_NUMBER
+    STATUS_ICON = {"setup": "🔧", "session_0": "🌱", "aktiv": "⚔️", "pausiert": "⏸", "beendet": "🏁"}
+
+    # ── 1:1 with adventure name arg ───────────────────────────────────────────
+    if args and not group_id:
+        suche = " ".join(args).lower()
+        data = yaml.safe_load((TTRPG / "status.yaml").read_text()) or {}
+        player_name = signal_client.get_sender_name(sender, players)
+
+        treffer = None
+        for a in data.get("abenteuer", []):
+            if suche not in a.get("name", "").lower() and suche not in a.get("ordner", "").lower():
+                continue
+            # Access check: admin sees all, player only their own
+            if not is_admin:
+                names = [s["name"].lower() for s in a.get("spieler", [])]
+                if player_name.lower() not in names:
+                    continue
+            treffer = a
+            break
+
+        if not treffer:
+            return f"❌ Adventure '{' '.join(args)}' not found (or not yours)."
+
+        ordner = treffer["ordner"]
+        name = treffer.get("name", ordner)
+        status = treffer.get("status", "?")
+        icon = STATUS_ICON.get(status, "📖")
+        zuletzt = treffer.get("zuletzt_gespielt", "—")
+        letzte_szene = treffer.get("letzte_szene", "")
+        spieler_liste = [s["name"] for s in treffer.get("spieler", [])]
+
+        lines = [f"{icon} **{name}**", f"Status: {status} | Last played: {zuletzt or '—'}", ""]
+
+        setting = session_manager.load_setting(ordner)
+        welt = setting.get("welt", {})
+        if welt.get("beschreibung"):
+            lines.append(f"*{welt['beschreibung']}*")
+            lines.append("")
+        konflikt = setting.get("konflikt", {})
+        if konflikt.get("hauptbedrohung"):
+            lines.append(f"**Conflict:** {konflikt['hauptbedrohung']}")
+        if spieler_liste:
+            lines.append(f"**Players:** {', '.join(spieler_liste)}")
+        chars = session_manager.load_characters(ordner)
+        if chars:
+            lines.append(f"**Characters:** {', '.join(c.get('charakter', {}).get('name', '?') for c in chars)}")
+        if letzte_szene:
+            lines += ["", f"**Last scene:** {letzte_szene}"]
+        return "\n".join(lines)
+
+    # ── 1:1 without args → list all accessible adventures ────────────────────
+    if not group_id:
+        data = yaml.safe_load((TTRPG / "status.yaml").read_text()) or {}
+        player_name = signal_client.get_sender_name(sender, players)
+        abenteuer = data.get("abenteuer", [])
+        if not is_admin:
+            abenteuer = [a for a in abenteuer
+                         if any(s["name"].lower() == player_name.lower()
+                                for s in a.get("spieler", []))]
+        if not abenteuer:
+            return "No adventures found."
+        lines = ["**Adventures:**", ""]
+        for a in abenteuer:
+            icon = STATUS_ICON.get(a.get("status", ""), "📖")
+            name = a.get("name", a.get("ordner", "?"))
+            spieler = ", ".join(s["name"] for s in a.get("spieler", []))
+            zuletzt = a.get("zuletzt_gespielt", "")
+            line = f"{icon} **{name}**"
+            if spieler:
+                line += f" — {spieler}"
+            if zuletzt:
+                line += f" _{zuletzt}_"
+            lines.append(line)
+        lines += ["", "Type *!status <name>* for details."]
+        return "\n".join(lines)
+
+    # ── Group chat → current adventure state ─────────────────────────────────
+    if not adventure_folder:
+        return "❌ No active adventure found."
     session = session_manager.load_session(adventure_folder)
     ort = session.get("aktueller_ort") or session.get("aktuelle_szene", {}).get("ort", "?")
     szene = session.get("letzte_szene") or session.get("aktuelle_szene", {}).get("zusammenfassung", "—")
@@ -464,90 +549,6 @@ def cmd_dm(args: list, **_) -> str:
     return f"✅ Nachricht an {spieler_name} gesendet."
 
 
-def cmd_adventures(**_) -> str:
-    """!adventures — alle Abenteuer mit Status anzeigen."""
-    status_path = TTRPG / "status.yaml"
-    data = yaml.safe_load(status_path.read_text()) or {}
-    abenteuer = data.get("abenteuer", [])
-    if not abenteuer:
-        return "❌ Keine Abenteuer gefunden."
-
-    STATUS_ICON = {
-        "session_0": "🌱",
-        "aktiv":     "⚔️",
-        "pausiert":  "⏸",
-        "beendet":   "🏁",
-    }
-    lines = ["**Abenteuer:**", ""]
-    for a in abenteuer:
-        icon = STATUS_ICON.get(a.get("status", ""), "📖")
-        name = a.get("name", a.get("ordner", "?"))
-        spieler = ", ".join(s["name"] for s in a.get("spieler", []))
-        zuletzt = a.get("zuletzt_gespielt", "")
-        zeile = f"{icon} **{name}**"
-        if spieler:
-            zeile += f" — {spieler}"
-        if zuletzt:
-            zeile += f" _{zuletzt}_"
-        lines.append(zeile)
-    return "\n".join(lines)
-
-
-def cmd_adventure(args: list, **_) -> str:
-    """!adventure <name> — Zusammenfassung eines Abenteuers."""
-    if not args:
-        return "Usage: !adventure <name>"
-
-    suche = " ".join(args).lower()
-    status_path = TTRPG / "status.yaml"
-    data = yaml.safe_load(status_path.read_text()) or {}
-
-    # Suche nach Name oder Ordner (Teilstring reicht)
-    treffer = None
-    for a in data.get("abenteuer", []):
-        if suche in a.get("name", "").lower() or suche in a.get("ordner", "").lower():
-            treffer = a
-            break
-
-    if not treffer:
-        return f"❌ Kein Abenteuer gefunden für '{suche}'."
-
-    ordner = treffer["ordner"]
-    name = treffer.get("name", ordner)
-    status = treffer.get("status", "?")
-    zuletzt = treffer.get("zuletzt_gespielt", "—")
-    letzte_szene = treffer.get("letzte_szene", "")
-    spieler_liste = [s["name"] for s in treffer.get("spieler", [])]
-
-    lines = [f"📖 **{name}**", f"Status: {status} | Zuletzt: {zuletzt or '—'}", ""]
-
-    # Setting laden
-    setting = session_manager.load_setting(ordner)
-    welt = setting.get("welt", {})
-    if welt.get("beschreibung"):
-        lines.append(f"*{welt['beschreibung']}*")
-        lines.append("")
-
-    konflikt = setting.get("konflikt", {})
-    if konflikt.get("hauptbedrohung"):
-        lines.append(f"**Konflikt:** {konflikt['hauptbedrohung']}")
-
-    if spieler_liste:
-        lines.append(f"**Spieler:** {', '.join(spieler_liste)}")
-
-    # Charaktere im Abenteuer
-    chars = session_manager.load_characters(ordner)
-    if chars:
-        char_namen = [c.get("charakter", {}).get("name", "?") for c in chars]
-        lines.append(f"**Charaktere:** {', '.join(char_namen)}")
-
-    if letzte_szene:
-        lines.append("")
-        lines.append(f"**Letzte Szene:** {letzte_szene}")
-
-    return "\n".join(lines)
-
-
 def cmd_players(**_) -> str:
     """!players — alle registrierten Spieler anzeigen."""
     players_dir = TTRPG / "players"
@@ -617,6 +618,8 @@ def cmd_help(sender: str, **_) -> str:
     lines = ["**Verfügbare Kommandos:**", ""]
 
     lines += [
+        "!status — current adventure state (in group) or list your adventures (in DM)",
+        "!status <name> — adventure details by name (in DM)",
         "!charakter — show your character sheet",
         "!avatar — show / regenerate your portrait",
         "!help — this help",
@@ -626,15 +629,12 @@ def cmd_help(sender: str, **_) -> str:
         lines += [
             "",
             "**Admin:**",
-            "!status — current game state",
             "!save — save game & end session",
             "!new <name> [@Player ...] [--flag ...] — create new adventure",
             "!session0 — start Session 0",
             "!dm @Player [text] — secret 1:1 message to a player",
             "!invite +43... Name — register new player",
             "!players — list all registered players",
-            "!adventures — list all adventures",
-            "!adventure <name> — summary of an adventure",
             "!usage — API usage & estimated costs",
             "!showme [idea] — generate & send an atmospheric scene image",
         ]
@@ -779,27 +779,26 @@ def cmd_charakter(sender: str, args: list, players: dict, reply_to: str,
 # ── Kommando-Router ───────────────────────────────────────────────────────────
 
 COMMANDS = {
-    "!save":        cmd_save,
-    "!status":      cmd_status,
-    "!new":         cmd_new,
-    "!session0":    cmd_session0,
-    "!dm":          cmd_dm,
-    "!charakter":   cmd_charakter,
-    "!avatar":      cmd_avatar,
-    "!help":        cmd_help,
-    "!invite":      cmd_invite,
-    "!players":     cmd_players,
-    "!adventures":  cmd_adventures,
-    "!adventure":   cmd_adventure,
-    "!usage":       cmd_usage,
-    "!showme":      cmd_showme,
+    "!save":      cmd_save,
+    "!status":    cmd_status,
+    "!new":       cmd_new,
+    "!session0":  cmd_session0,
+    "!dm":        cmd_dm,
+    "!charakter": cmd_charakter,
+    "!avatar":    cmd_avatar,
+    "!help":      cmd_help,
+    "!invite":    cmd_invite,
+    "!players":   cmd_players,
+    "!usage":     cmd_usage,
+    "!showme":    cmd_showme,
 }
 
-NEEDS_ADVENTURE = {"!save", "!status", "!session0", "!avatar", "!showme"}
+# !status needs adventure only in group context — handled inside the function
+NEEDS_ADVENTURE = {"!save", "!session0", "!avatar", "!showme"}
 
 
 def handle_command(text: str, sender: str, adventure_folder: str | None,
-                   reply_to: str, players: dict) -> str | None:
+                   reply_to: str, players: dict, group_id: str | None = None) -> str | None:
     parts = text.split()
     cmd = parts[0].lower()
     args = parts[1:]
@@ -825,6 +824,7 @@ def handle_command(text: str, sender: str, adventure_folder: str | None,
         adventure_folder=adventure_folder,
         reply_to=reply_to,
         players=players,
+        group_id=group_id,
     )
 
 
@@ -936,7 +936,7 @@ def process_message(msg: dict, players: dict, registered_groups: set):
     if text.startswith("!"):
         _processing = True
         try:
-            response = handle_command(text, sender, adventure_folder, reply_to, players)
+            response = handle_command(text, sender, adventure_folder, reply_to, players, group_id=group_id)
             if response:
                 signal_client.send(reply_to, response)
         except Exception as e:
