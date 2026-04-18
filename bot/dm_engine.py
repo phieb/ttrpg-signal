@@ -124,6 +124,7 @@ def _build_system_setup(adventure_folder: str, player_name: str, setting: dict) 
     stimmung = setting.get("stimmung", "")
     trigger_warnings = setting.get("trigger_warnings", [])
     welt_beschreibung = welt.get("beschreibung", "")
+    verfuegbare_spezies = setting.get("verfuegbare_spezies", [])
 
     context_lines = [
         f"## Abenteuer: {abenteuer_name}",
@@ -135,6 +136,8 @@ def _build_system_setup(adventure_folder: str, player_name: str, setting: dict) 
         context_lines.append(f"Welt: {welt_beschreibung}")
     if trigger_warnings:
         context_lines.append("Trigger Warnings: " + ", ".join(trigger_warnings))
+    if verfuegbare_spezies:
+        context_lines.append("verfuegbare_spezies: " + ", ".join(verfuegbare_spezies))
 
     cached_text = setup_prompt + _SIGNAL_INSTRUCTIONS
     if flag_prompts:
