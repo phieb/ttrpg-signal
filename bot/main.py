@@ -186,7 +186,8 @@ def _flush_batches() -> None:
         _processing = True
         try:
             time.sleep(RESPONSE_DELAY_SECONDS)
-            dm_reply = dm_engine.respond(folder, sender_name, combined)
+            phase = "SESSION_ZERO" if is_session_0 else "DUNGEON_MASTER"
+            dm_reply = dm_engine.respond(folder, sender_name, combined, phase=phase)
             signal_client.send(reply_to, dm_reply)
 
             # Session 0: Charaktere aus History extrahieren und ggf. finalisieren
@@ -239,7 +240,14 @@ def _is_rate_limited(sender: str) -> bool:
 def load_registered_groups() -> set:
     try:
         data = yaml.safe_load((TTRPG / "status.yaml").read_text())
-        return {a["signal_gruppe"] for a in data.get("abenteuer", []) if a.get("signal_gruppe")}
+        groups = set()
+        for a in data.get("abenteuer", []):
+            if a.get("signal_gruppe"):
+                groups.add(a["signal_gruppe"])
+            for s in a.get("spieler", []):
+                if s.get("private_gruppe"):
+                    groups.add(s["private_gruppe"])
+        return groups
     except Exception as e:
         logger.warning(f"status.yaml konnte nicht geladen werden: {e}")
         return set()
@@ -359,11 +367,11 @@ def cmd_neu(args: list, reply_to: str, **_) -> str:
         if not telefon:
             not_found.append(sname)
         else:
-            spieler_eintraege.append({"name": sname})
+            spieler_eintraege.append({"name": sname, "telefon": telefon})
             if telefon not in member_phones:
                 member_phones.append(telefon)
 
-    # Signal-Gruppe erstellen (wenn Spieler angegeben)
+    # Spielgruppe erstellen (wenn Spieler angegeben)
     group_id = ""
     group_msg = ""
     if spieler_namen:
@@ -375,33 +383,54 @@ def cmd_neu(args: list, reply_to: str, **_) -> str:
         else:
             group_msg = f"\n⚠️ Gruppe konnte nicht erstellt werden — ID manuell in status.yaml eintragen.{group_msg}"
 
-    # status.yaml updaten
+    # status.yaml updaten — Spieler ohne Telefon im Eintrag (nur Name + setup-Felder)
     status_path = TTRPG / "status.yaml"
     data = yaml.safe_load(status_path.read_text()) or {}
+    status_spieler = [
+        {"name": s["name"], "charakter": "", "setup_status": "invited", "private_gruppe": ""}
+        for s in spieler_eintraege
+    ]
     data.setdefault("abenteuer", []).append({
         "ordner": ordner,
         "name": name,
-        "status": "session_0",
+        "status": "setup",
         "letzte_szene": "",
         "zuletzt_gespielt": "",
         "signal_gruppe": group_id,
-        "spieler": spieler_eintraege,
+        "spieler": status_spieler,
     })
     status_path.write_text(yaml.dump(data, allow_unicode=True, default_flow_style=False))
-
     logger.info(f"Neues Abenteuer erstellt: {ordner} (Gruppe: {group_id or '—'})")
 
-    # Willkommenstext in die neue Gruppe schicken
+    # Privaten Setup-Kanal pro Spieler erstellen + CHARACTER_SETUP starten
+    setup_msgs = []
+    for s in spieler_eintraege:
+        sname, stelefon = s["name"], s["telefon"]
+        private_phones = list({SIGNAL_PHONE_NUMBER, ADMIN_PHONE_NUMBER, stelefon})
+        private_group_id = signal_client.create_group(f"{name} — {sname}", private_phones)
+        if private_group_id:
+            session_manager.set_player_private_gruppe(ordner, sname, private_group_id)
+            intro = dm_engine.respond_setup(
+                ordner, sname,
+                f"setup_start — Spieler {sname} wurde eingeladen. Starte die Einladungsphase."
+            )
+            signal_client.send(private_group_id, intro)
+            logger.info(f"[{ordner}] Privater Setup-Kanal für {sname}: {private_group_id}")
+        else:
+            setup_msgs.append(f"⚠️ Setup-Kanal für {sname} konnte nicht erstellt werden.")
+            logger.warning(f"[{ordner}] Privater Setup-Kanal für {sname} fehlgeschlagen")
+
+    if setup_msgs:
+        group_msg += "\n" + "\n".join(setup_msgs)
+
+    # Spielgruppe informieren (noch kein !session0 — erst wenn alle ready)
     if group_id:
-        spieler_str = " ".join(f"@{s['name']}" for s in spieler_eintraege) if spieler_eintraege else ""
-        willkommen = (
-            f"⚔️ Willkommen zu **{name}**!\n\n"
-            f"Diese Gruppe ist euer Abenteurertreff. Hier antwortet euer Dungeon Master auf alles was ihr schreibt.\n\n"
-            f"*Bereit loszulegen?*\n\n"
-            f"Schreibt einfach **!session0** um Session 0 zu starten — dort erstellt ihr eure Charaktere und lernt die Welt kennen.\n\n"
-            f"Mit **!help** seht ihr alle verfügbaren Befehle. Viel Spaß am Spieltisch! 🎲"
+        signal_client.send(
+            group_id,
+            f"⚔️ **{name}** wurde erstellt!\n\n"
+            "*Die Charaktererstellung läuft gerade privat — jeder Spieler bekommt seinen eigenen Kanal.*\n\n"
+            "Sobald alle bereit sind geht es hier weiter. 🎲"
         )
-        signal_client.send(group_id, willkommen)
 
     return f"✅ Abenteuer **{name}** erstellt.{group_msg}"
 
@@ -414,7 +443,7 @@ def cmd_session0(adventure_folder: str, reply_to: str, **_) -> str:
     dm_engine.clear_history(adventure_folder)
 
     # DM Session-0-Eröffnung generieren
-    intro = dm_engine.respond(adventure_folder, "System", "Starte Session 0. Begrüße die Spieler und führe durch die Charaktererstellung.")
+    intro = dm_engine.respond(adventure_folder, "System", "Starte Session 0. Begrüße die Spieler — die Charaktere sind bereits erstellt.", phase="SESSION_ZERO")
     signal_client.send(reply_to, intro)
     return None  # DM hat bereits geantwortet
 
@@ -540,7 +569,7 @@ def cmd_spieler(**_) -> str:
 
 
 def cmd_invite(args: list, **_) -> str:
-    """!invite +43... Name — neuen Spieler registrieren."""
+    """!invite +43... Name — neuen Spieler global registrieren."""
     if len(args) < 2:
         return "Usage: !invite +43... Name"
 
@@ -557,7 +586,6 @@ def cmd_invite(args: list, **_) -> str:
     if target.exists():
         return f"❌ Spieler '{name}' existiert bereits."
 
-    # Doppelte Nummer prüfen
     for f in players_dir.glob("*.yaml"):
         try:
             data = yaml.safe_load(f.read_text())
@@ -573,16 +601,15 @@ def cmd_invite(args: list, **_) -> str:
     ))
     logger.info(f"Neuer Spieler registriert: {name} ({telefon})")
 
-    # Willkommensnachricht an den neuen Spieler
     willkommen = (
         f"⚔️ Hallo **{name}**!\n\n"
-        "Ich bin der **Castle Assistant** — dein digitaler Dungeon Master.\n"
-        "Du wurdest als Spieler registriert. Schreib mir hier direkt oder in eurer Abenteurergruppe.\n\n"
-        "Tippe *!help* um zu sehen, was du alles fragen kannst. Bis bald am Spieltisch! 🎲"
+        "Ich bin euer digitaler Dungeon Master.\n"
+        "Du wurdest registriert — sobald ein Abenteuer für dich bereit ist, melde ich mich hier.\n\n"
+        "Tippe *!help* um zu sehen was du fragen kannst. Bis bald! 🎲"
     )
     signal_client.send(telefon, willkommen)
 
-    return f"✅ **{name}** ({telefon}) registriert und begrüßt."
+    return f"✅ **{name}** ({telefon}) registriert."
 
 
 def cmd_help(sender: str, **_) -> str:
@@ -803,6 +830,61 @@ def handle_command(text: str, sender: str, adventure_folder: str | None,
 
 # ── Message Processing ────────────────────────────────────────────────────────
 
+def _handle_setup_message(adventure_folder: str, player_name: str, text: str, reply_to: str) -> None:
+    """Verarbeitet eine Nachricht im privaten CHARACTER_SETUP Kanal."""
+    global _processing
+    _processing = True
+    try:
+        time.sleep(RESPONSE_DELAY_SECONDS)
+        dm_reply = dm_engine.respond_setup(adventure_folder, player_name, text)
+        signal_client.send(reply_to, dm_reply)
+
+        # Charakter aus History extrahieren und speichern
+        char_data = dm_engine.extract_character_from_setup_history(adventure_folder, player_name)
+        if char_data.get("name"):
+            session_manager.save_character(adventure_folder, player_name, char_data)
+
+        # Prüfen ob der DM "ready" signalisiert hat (einfache Heuristik: "bereit" im Reply)
+        if "bereit" in dm_reply.lower() and char_data.get("name"):
+            session_manager.set_player_setup_status(adventure_folder, player_name, "ready")
+            logger.info(f"[{adventure_folder}] {player_name} Setup abgeschlossen")
+            # Avatar generieren
+            avatar_path = generate_avatar.generate_avatar(adventure_folder, char_data["name"])
+            if avatar_path:
+                signal_client.send_file(reply_to, str(avatar_path), f"🎭 {char_data['name']}")
+            # Wenn alle Spieler ready → Gruppe benachrichtigen
+            if session_manager.all_players_ready(adventure_folder):
+                _notify_group_all_ready(adventure_folder)
+
+    except Exception as e:
+        logger.error(f"[{adventure_folder}/setup/{player_name}] Fehler: {e}", exc_info=True)
+    finally:
+        _processing = False
+        if not running:
+            raise SystemExit(0)
+
+
+def _notify_group_all_ready(adventure_folder: str) -> None:
+    """Setzt Abenteuer-Status auf session_0 und benachrichtigt den Gruppenkanal."""
+    try:
+        status_path = TTRPG / "status.yaml"
+        data = yaml.safe_load(status_path.read_text()) or {}
+        for a in data.get("abenteuer", []):
+            if a.get("ordner") == adventure_folder:
+                a["status"] = "session_0"
+                status_path.write_text(yaml.dump(data, allow_unicode=True, default_flow_style=False))
+                group_id = a.get("signal_gruppe")
+                if group_id:
+                    signal_client.send(
+                        group_id,
+                        "⚔️ Alle Charaktere sind bereit — Session 0 kann starten!\n"
+                        "Schreibt *!session0* um loszulegen."
+                    )
+                return
+    except Exception as e:
+        logger.warning(f"[{adventure_folder}] Gruppen-Benachrichtigung fehlgeschlagen: {e}")
+
+
 def process_message(msg: dict, players: dict, registered_groups: set):
     global _processing
     sender = msg["sender"]
@@ -814,6 +896,24 @@ def process_message(msg: dict, players: dict, registered_groups: set):
     if sender == SIGNAL_PHONE_NUMBER:
         return
 
+    # Unbekannte Nummern still ignorieren
+    if not is_registered_player(sender, players) and sender != ADMIN_PHONE_NUMBER:
+        logger.debug(f"Unbekannte Nummer ignoriert: {sender}")
+        return
+
+    # Privaten Setup-Kanal prüfen (vor allem anderen — eindeutige Zuordnung per Gruppen-ID)
+    if group_id:
+        setup_ctx = session_manager.get_setup_context_for_group(group_id)
+        if setup_ctx:
+            adventure_folder, player_name = setup_ctx
+            logger.info(f"[{adventure_folder}/setup/{player_name}] {sender_name}: {text}")
+            if not text.startswith("!"):
+                if not _is_rate_limited(sender):
+                    _handle_setup_message(adventure_folder, player_name, text, group_id)
+                else:
+                    logger.warning(f"Rate limit für {sender_name} im Setup — ignoriert")
+            return  # Setup-Kanal: keine Kommandos, kein Batching
+
     # Abenteuer und Reply-Ziel bestimmen
     if group_id:
         if group_id not in registered_groups:
@@ -824,11 +924,6 @@ def process_message(msg: dict, players: dict, registered_groups: set):
     else:
         adventure_folder = session_manager.get_adventure_for_player(sender)
         reply_to = sender
-
-    # Unbekannte Nummern still ignorieren
-    if not is_registered_player(sender, players) and sender != ADMIN_PHONE_NUMBER:
-        logger.debug(f"Unbekannte Nummer ignoriert: {sender}")
-        return
 
     # Rate Limiting (Kommandos ausgenommen — nur Spielnachrichten drosseln)
     if not text.startswith("!") and _is_rate_limited(sender):

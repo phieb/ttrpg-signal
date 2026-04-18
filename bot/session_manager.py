@@ -30,12 +30,66 @@ def _save_yaml(path: Path, data: dict) -> None:
 # ── Gruppen-Routing ───────────────────────────────────────────────────────────
 
 def get_adventure_for_group(group_id: str) -> str | None:
-    """Gibt den Abenteuer-Ordnernamen für eine Signal-Gruppen-ID zurück."""
+    """Gibt den Abenteuer-Ordnernamen für eine Signal-Gruppen-ID zurück (Spielgruppe)."""
     status = _load_yaml(TTRPG / "status.yaml")
     for abenteuer in status.get("abenteuer", []):
         if abenteuer.get("signal_gruppe") == group_id:
             return abenteuer["ordner"]
     return None
+
+
+def get_setup_context_for_group(group_id: str) -> tuple[str, str] | None:
+    """
+    Prüft ob eine Gruppen-ID ein privater Setup-Kanal ist.
+    Gibt (adventure_folder, player_name) zurück oder None.
+    """
+    status = _load_yaml(TTRPG / "status.yaml")
+    for abenteuer in status.get("abenteuer", []):
+        for spieler in abenteuer.get("spieler", []):
+            if spieler.get("private_gruppe") == group_id:
+                return abenteuer["ordner"], spieler["name"]
+    return None
+
+
+def set_player_setup_status(adventure_folder: str, player_name: str, setup_status: str) -> None:
+    """Setzt den setup_status eines Spielers (invited / ready)."""
+    status_path = TTRPG / "status.yaml"
+    data = _load_yaml(status_path)
+    for abenteuer in data.get("abenteuer", []):
+        if abenteuer.get("ordner") == adventure_folder:
+            for spieler in abenteuer.get("spieler", []):
+                if spieler.get("name", "").lower() == player_name.lower():
+                    spieler["setup_status"] = setup_status
+                    _save_yaml(status_path, data)
+                    logger.info(f"[{adventure_folder}] {player_name} setup_status → {setup_status}")
+                    return
+
+
+def set_player_private_gruppe(adventure_folder: str, player_name: str, group_id: str) -> None:
+    """Speichert die private Gruppen-ID eines Spielers für einen Abenteuer-Eintrag."""
+    status_path = TTRPG / "status.yaml"
+    data = _load_yaml(status_path)
+    for abenteuer in data.get("abenteuer", []):
+        if abenteuer.get("ordner") == adventure_folder:
+            for spieler in abenteuer.get("spieler", []):
+                if spieler.get("name", "").lower() == player_name.lower():
+                    spieler["private_gruppe"] = group_id
+                    spieler["setup_status"] = "invited"
+                    _save_yaml(status_path, data)
+                    logger.info(f"[{adventure_folder}] {player_name} private_gruppe → {group_id}")
+                    return
+
+
+def all_players_ready(adventure_folder: str) -> bool:
+    """True wenn alle Spieler eines Abenteuers setup_status == 'ready' haben."""
+    status = _load_yaml(TTRPG / "status.yaml")
+    for abenteuer in status.get("abenteuer", []):
+        if abenteuer.get("ordner") == adventure_folder:
+            spieler_liste = abenteuer.get("spieler", [])
+            if not spieler_liste:
+                return False
+            return all(s.get("setup_status") == "ready" for s in spieler_liste)
+    return False
 
 
 def _load_players() -> dict:
@@ -165,6 +219,14 @@ def save_character(adventure_folder: str, player_name: str, char_data: dict) -> 
     slug = char_name.lower().replace(" ", "_")
     yaml_path = chars_dir / f"{slug}.yaml"
 
+    praeferenzen = char_data.get("praeferenzen", {})
+    if not praeferenzen:
+        # Flat fields from extraction fallback
+        no_gos = char_data.get("no_gos", [])
+        wishes = char_data.get("wishes", [])
+        if no_gos or wishes:
+            praeferenzen = {"no_gos": no_gos, "wishes": wishes}
+
     char_yaml = {
         "charakter": {"name": char_name, "gespielt_von": player_name},
         "identitaet": {k: v for k, v in {
@@ -182,6 +244,7 @@ def save_character(adventure_folder: str, player_name: str, char_data: dict) -> 
         "beziehungen": {k: v for k, v in {
             "begleiter": char_data.get("begleiter", ""),
         }.items() if v},
+        "praeferenzen": praeferenzen or {"no_gos": [], "wishes": []},
         "imagen_prompt": char_data.get("imagen_prompt", ""),
     }
 

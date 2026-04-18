@@ -26,69 +26,75 @@ _history: dict[str, list] = defaultdict(list)
 _interaction_count: dict[str, int] = defaultdict(int)
 
 
-def _load_dm_prompt() -> str:
-    """Lädt den statischen DM System-Prompt aus der Engine."""
-    path = TTRPG / "_engine" / "DUNGEON_MASTER.md"
+def _load_engine_file(filename: str, fallback: str = "") -> str:
+    """Lädt eine Datei aus _engine/ mit optionalem Fallback-Text."""
+    path = TTRPG / "_engine" / filename
     try:
         return path.read_text()
     except Exception as e:
-        logger.error(f"DUNGEON_MASTER.md konnte nicht geladen werden: {e}")
-        return "Du bist ein Dungeon Master. Führe die Spieler durch ein Abenteuer."
+        logger.error(f"{filename} konnte nicht geladen werden: {e}")
+        return fallback
+
+
+def _load_dm_prompt() -> str:
+    return _load_engine_file("DUNGEON_MASTER.md", "Du bist ein Dungeon Master. Führe die Spieler durch ein Abenteuer.")
+
+
+def _load_character_setup_prompt() -> str:
+    return _load_engine_file("CHARACTER_SETUP.md", "Du führst ein privates Charaktererstellungs-Gespräch.")
 
 
 def _load_top_rules() -> str:
-    """Lädt die TOP_DM_REGELN — kurze Erinnerung die bei jeder Antwort aktiv bleibt."""
-    path = TTRPG / "_engine" / "TOP_DM_REGELN.md"
-    try:
-        return path.read_text()
-    except Exception as e:
-        logger.warning(f"TOP_DM_REGELN.md konnte nicht geladen werden: {e}")
-        return ""
+    return _load_engine_file("TOP_DM_REGELN.md")
 
 
-def _load_flag_prompts(adventure_folder: str) -> str:
-    """Lädt alle aktiven Flag-Prompts und gibt sie kombiniert zurück."""
+def _load_flag_prompts(adventure_folder: str, phase: str = "DUNGEON_MASTER") -> str:
+    """
+    Lädt alle aktiven Flag-Prompts für die angegebene Phase.
+    Sucht in flags/[flag]/[phase].md — z.B. flags/booktok/CHARACTER_SETUP.md
+    Jeder Flag lebt in einem eigenen Unterordner.
+    """
     flags = session_manager.load_flags(adventure_folder)
     flags_dir = TTRPG / "_engine" / "flags"
     parts = []
     for flag, enabled in flags.items():
-        if enabled:
-            prompt_path = flags_dir / f"{flag}.md"
-            try:
-                parts.append(prompt_path.read_text())
-            except FileNotFoundError:
-                logger.warning(f"Flag-Prompt nicht gefunden: {prompt_path}")
+        if not enabled:
+            continue
+        prompt_path = flags_dir / flag / f"{phase}.md"
+        if prompt_path.exists():
+            parts.append(prompt_path.read_text())
+        else:
+            logger.debug(f"Kein {phase}.md für Flag '{flag}' — übersprungen")
     return "\n\n".join(parts)
 
 
-def _build_system(adventure_folder: str) -> list:
-    """Baut die system-Blöcke auf — DM-Prompt + statische Anweisungen gecacht, Kontext frisch."""
+_SIGNAL_INSTRUCTIONS = (
+    "\n\n---\n\n"
+    "## WICHTIG — Technischer Kontext\n\n"
+    "Du läufst als Signal-Bot. Du hast KEINEN direkten Dateizugriff. "
+    "Alle relevanten Spieldaten wurden bereits aus den YAML-Dateien geladen "
+    "und sind unten eingebettet. "
+    "Erwähne niemals Dateien oder fehlenden Zugriff. "
+    "Steige direkt in die Szene bzw. das Gespräch ein.\n\n"
+    "FORMATIERUNG: Du schreibst in Signal (text_mode=styled). Verwende ausschließlich:\n"
+    "- **fett** für wichtige Begriffe, Ortsnamen, NSC-Namen\n"
+    "- *kursiv* für atmosphärische Beschreibungen, Gedanken, Flüstern\n"
+    "- Keine Markdown-Header (##), keine HTML, kein Underscore-Italic\n"
+    "- Emojis sparsam einsetzen, nur wenn sie zur Atmosphäre passen"
+)
+
+
+def _build_system(adventure_folder: str, phase: str = "DUNGEON_MASTER") -> list:
+    """System-Blöcke für reguläres Spiel und Session 0 (Gruppenkanal)."""
     dm_prompt = _load_dm_prompt()
-    flag_prompts = _load_flag_prompts(adventure_folder)
+    flag_prompts = _load_flag_prompts(adventure_folder, phase=phase)
     context = session_manager.build_context(adventure_folder)
     top_rules = _load_top_rules()
 
-    signal_instructions = (
-        "\n\n---\n\n"
-        "## WICHTIG — Technischer Kontext\n\n"
-        "Du läufst als Signal-Bot. Du hast KEINEN direkten Dateizugriff. "
-        "Alle relevanten Spieldaten wurden bereits aus den YAML-Dateien geladen "
-        "und sind unten als 'Aktueller Spielstand' eingebettet. "
-        "Erwähne niemals Dateien oder fehlenden Zugriff. "
-        "Steige direkt als DM in die Szene ein.\n\n"
-        "FORMATIERUNG: Du schreibst in Signal (text_mode=styled). Verwende ausschließlich:\n"
-        "- **fett** für wichtige Begriffe, Ortsnamen, NSC-Namen\n"
-        "- *kursiv* für atmosphärische Beschreibungen, Gedanken, Flüstern\n"
-        "- Keine Markdown-Header (##), keine HTML, kein Underscore-Italic\n"
-        "- Emojis sparsam einsetzen, nur wenn sie zur Atmosphäre passen"
-    )
-
-    # Cached block: DM-Prompt + Signal-Anweisungen + Flag-Prompts (alle stabil pro Session)
-    cached_text = dm_prompt + signal_instructions
+    cached_text = dm_prompt + _SIGNAL_INSTRUCTIONS
     if flag_prompts:
         cached_text += "\n\n" + flag_prompts
 
-    # Dynamic block: TOP_DM_REGELN (frisch bei jeder Antwort) + aktueller Spielstand
     dynamic_parts = []
     if top_rules:
         dynamic_parts.append(top_rules)
@@ -97,16 +103,52 @@ def _build_system(adventure_folder: str) -> list:
     return [
         {
             "type": "text",
-            # DM-Prompt + Signal-Anweisungen + Flag-Prompts zusammen cachen.
-            # (Haiku benötigt ≥2048 Tokens; kombiniert deutlich über der Schwelle)
             "text": cached_text,
             "cache_control": {"type": "ephemeral"},
         },
         {
             "type": "text",
-            # TOP_DM_REGELN + Spielstand bleiben uncached — die Regeln bleiben so bei
-            # jeder Antwort frisch im Vordergrund, der Spielstand ändert sich jede Runde.
             "text": "\n\n".join(dynamic_parts),
+        },
+    ]
+
+
+def _build_system_setup(adventure_folder: str, player_name: str, setting: dict) -> list:
+    """System-Blöcke für den privaten CHARACTER_SETUP Kanal."""
+    setup_prompt = _load_character_setup_prompt()
+    flag_prompts = _load_flag_prompts(adventure_folder, phase="CHARACTER_SETUP")
+
+    # Kontext: Abenteuer-Setting + Spieler-Info (kein voller session-Kontext nötig)
+    welt = setting.get("welt", {})
+    abenteuer_name = setting.get("name", adventure_folder.replace("_", " ").title())
+    stimmung = setting.get("stimmung", "")
+    trigger_warnings = setting.get("trigger_warnings", [])
+    welt_beschreibung = welt.get("beschreibung", "")
+
+    context_lines = [
+        f"## Abenteuer: {abenteuer_name}",
+        f"Spieler: {player_name}",
+    ]
+    if stimmung:
+        context_lines.append(f"Stimmung: {stimmung}")
+    if welt_beschreibung:
+        context_lines.append(f"Welt: {welt_beschreibung}")
+    if trigger_warnings:
+        context_lines.append("Trigger Warnings: " + ", ".join(trigger_warnings))
+
+    cached_text = setup_prompt + _SIGNAL_INSTRUCTIONS
+    if flag_prompts:
+        cached_text += "\n\n" + flag_prompts
+
+    return [
+        {
+            "type": "text",
+            "text": cached_text,
+            "cache_control": {"type": "ephemeral"},
+        },
+        {
+            "type": "text",
+            "text": "\n".join(context_lines),
         },
     ]
 
@@ -189,9 +231,10 @@ def _load_history_from_log(adventure_folder: str) -> None:
         logger.warning(f"Log-Lesen fehlgeschlagen ({log_path}): {ex}")
 
 
-def respond(adventure_folder: str, sender_name: str, message: str) -> str:
+def respond(adventure_folder: str, sender_name: str, message: str, phase: str = "DUNGEON_MASTER") -> str:
     """
     Verarbeitet eine Spieler-Nachricht und gibt die DM-Antwort zurück.
+    phase: "DUNGEON_MASTER" für reguläres Spiel, "SESSION_ZERO" für Session 0.
     History wird im Memory gehalten.
     """
     # History aus Log laden falls noch nicht im Memory (z.B. nach Neustart)
@@ -207,7 +250,7 @@ def respond(adventure_folder: str, sender_name: str, message: str) -> str:
         response = client.messages.create(
             model=MODEL,
             max_tokens=MAX_CONTEXT_TOKENS,
-            system=_build_system(adventure_folder),
+            system=_build_system(adventure_folder, phase=phase),
             messages=_history[adventure_folder],
         )
 
@@ -236,6 +279,115 @@ def respond(adventure_folder: str, sender_name: str, message: str) -> str:
         logger.error(f"Claude API Fehler: {e}")
         _history[adventure_folder].pop()
         return "*(Der DM räuspert sich — kurze Pause, gleich weiter.)*"
+
+
+def respond_setup(adventure_folder: str, player_name: str, message: str) -> str:
+    """
+    Verarbeitet eine Nachricht im privaten CHARACTER_SETUP Kanal.
+    History-Key: "setup_{adventure_folder}_{player_name}" — getrennt vom Gruppenkanal.
+    """
+    history_key = f"setup_{adventure_folder}_{player_name.lower()}"
+
+    _log_message(adventure_folder, "user", player_name, f"[SETUP] {message}")
+    user_content = f"**{player_name}:** {message}"
+    _history[history_key].append({"role": "user", "content": user_content})
+    _trim_history(history_key)
+
+    setting = session_manager.load_setting(adventure_folder)
+
+    try:
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=MAX_CONTEXT_TOKENS,
+            system=_build_system_setup(adventure_folder, player_name, setting),
+            messages=_history[history_key],
+        )
+        dm_reply = response.content[0].text
+
+        _log_message(adventure_folder, "assistant", "DM", f"[SETUP] {dm_reply}")
+        _history[history_key].append({"role": "assistant", "content": dm_reply})
+
+        cache_read  = getattr(response.usage, "cache_read_input_tokens", 0)
+        cache_write = getattr(response.usage, "cache_creation_input_tokens", 0)
+        logger.info(
+            f"[{adventure_folder}/setup/{player_name}] Tokens: input={response.usage.input_tokens} "
+            f"output={response.usage.output_tokens} "
+            f"cache_read={cache_read} cache_write={cache_write}"
+        )
+        usage_tracker.track_anthropic(
+            response.usage.input_tokens, response.usage.output_tokens,
+            cache_read, cache_write,
+        )
+        return dm_reply
+
+    except anthropic.APIError as e:
+        logger.error(f"Claude API Fehler (Setup): {e}")
+        _history[history_key].pop()
+        return "*(Kurze Pause — gleich weiter.)*"
+
+
+def extract_character_from_setup_history(adventure_folder: str, player_name: str) -> dict:
+    """
+    Extrahiert strukturierte Charakterdaten aus der Setup-Konversations-History.
+    Gibt ein char_data dict zurück (wie extract_characters_from_history).
+    """
+    history_key = f"setup_{adventure_folder}_{player_name.lower()}"
+    history = _history.get(history_key, [])
+    if not history:
+        return {}
+
+    conversation = "\n".join(
+        f"DM: {msg['content']}" if msg["role"] == "assistant" else msg["content"]
+        for msg in history
+    )
+
+    prompt = (
+        f"Analysiere dieses Charaktererstellungs-Gespräch für Spieler '{player_name}' "
+        f"und extrahiere die Charakterdaten.\n\n"
+        f"Gespräch:\n{conversation}\n\n"
+        "Gib die extrahierten Daten als JSON zurück — nur Felder die tatsächlich "
+        "im Gespräch vorkommen, keine Erfindungen:\n"
+        '{"name": "Charaktername", '
+        '"wer_bist_du": "Kurze Charakterbeschreibung", '
+        '"aussehen": "Aussehen", '
+        '"alter": "Alter", '
+        '"herkunft": "Herkunft", '
+        '"skills": [{"name": "Skillname", "beschreibung": "Kurze Beschreibung"}], '
+        '"will": "Ziel/Wunsch des Charakters", '
+        '"fuerchtet": "Angst/Schwäche", '
+        '"geheimnis": "Geheimnis (falls erwähnt)", '
+        '"praeferenzen": {"no_gos": [], "wishes": []}, '
+        '"imagen_prompt": "Detailed English portrait prompt: appearance, clothing, style, background, lighting, mood"'
+        "}\n\n"
+        "Nur JSON zurückgeben. Felder weglassen wenn keine Info vorhanden."
+    )
+
+    try:
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=1500,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = response.content[0].text.strip()
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        data = json.loads(raw[start:end])
+        usage_tracker.track_anthropic(
+            response.usage.input_tokens, response.usage.output_tokens,
+            getattr(response.usage, "cache_read_input_tokens", 0),
+            getattr(response.usage, "cache_creation_input_tokens", 0),
+        )
+        logger.info(f"[{adventure_folder}/setup/{player_name}] Charakter extrahiert: {data.get('name', '?')}")
+        return data
+    except Exception as e:
+        logger.error(f"[{adventure_folder}/setup/{player_name}] Charakter-Extraktion fehlgeschlagen: {e}")
+        return {}
+
+
+def clear_setup_history(adventure_folder: str, player_name: str) -> None:
+    """Löscht die Setup-History eines Spielers nach Abschluss."""
+    history_key = f"setup_{adventure_folder}_{player_name.lower()}"
+    _history[history_key] = []
 
 
 def _load_session_text_from_log(adventure_folder: str) -> str:
