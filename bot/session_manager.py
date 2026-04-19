@@ -248,6 +248,18 @@ def save_character(adventure_folder: str, player_name: str, char_data: dict) -> 
     slug = char_name.lower().replace(" ", "_")
     yaml_path = chars_dir / f"{slug}.yaml"
 
+    # Remove any stale YAML for this player (name may have changed during setup)
+    for existing in chars_dir.glob("*.yaml"):
+        if existing == yaml_path:
+            continue
+        try:
+            existing_data = yaml.safe_load(existing.read_text()) or {}
+            if existing_data.get("charakter", {}).get("gespielt_von", "").lower() == player_name.lower():
+                existing.unlink()
+                logger.info(f"Veraltete Charakterdatei entfernt: {existing.name}")
+        except Exception:
+            pass
+
     praeferenzen = char_data.get("praeferenzen", {})
     if not praeferenzen:
         # Flat fields from extraction fallback
