@@ -1,7 +1,7 @@
 """
 Avatar- und Szenen-Bild-Generierung via Google Gemini Imagen.
 Avatare: Portrait-PNG pro Charakter nach Session 0.
-Szenen-Bilder: atmosphärisches 16:9-Bild der aktuellen Spielszene (!zeigmal).
+Szenen-Bilder: atmosphärisches 16:9-Bild der aktuellen Spielszene (!showme).
 """
 
 import logging
@@ -125,7 +125,7 @@ def generate_and_send_avatars(adventure_folder: str, reply_to: str,
         signal_client.send(reply_to, f"⚠️ Avatar für {char_name} konnte nicht generiert werden.")
 
 
-# ── Szenen-Bild (!zeigmal) ────────────────────────────────────────────────────
+# ── Szenen-Bild (!showme) ────────────────────────────────────────────────────
 
 def _build_scene_imagen_prompt(adventure_folder: str, hint: str = "") -> str | None:
     """
@@ -217,7 +217,7 @@ def _build_scene_imagen_prompt(adventure_folder: str, hint: str = "") -> str | N
 
 def generate_scene_image(adventure_folder: str, reply_to: str, hint: str = "") -> None:
     """
-    !zeigmal [hint] — generiert ein atmosphärisches 16:9-Szenenbild und schickt es in die Gruppe.
+    !showme [hint] — generiert ein atmosphärisches 16:9-Szenenbild und schickt es in die Gruppe.
     hint: optionaler Spieler-Wunsch, der als Inspiration in den Prompt einfließt.
     """
     signal_client.send(reply_to, "🎨 Generiere Szenen-Bild... einen Moment!")

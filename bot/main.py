@@ -414,6 +414,11 @@ def cmd_new(args: list, reply_to: str, **_) -> str:
     if not name_parts:
         return "Usage: !new <adventure-name> [@Player1 ...] [--flag1 --flag2 ...]"
 
+    # booktok requires mature — auto-enable if missing
+    if "booktok" in flag_namen and "mature" not in flag_namen:
+        flag_namen.append("mature")
+        logger.info("booktok flag gesetzt — mature automatisch aktiviert")
+
     name = " ".join(name_parts).strip('"\'„"')
     ordner = name.lower().replace(" ", "_")
     adventure_path = TTRPG / "adventures" / ordner
@@ -1002,7 +1007,25 @@ def main():
         _flush_batches()
         time.sleep(POLL_INTERVAL)
 
+    _shutdown_save()
     logger.info("Bot beendet.")
+
+
+def _shutdown_save() -> None:
+    """
+    Komprimiert alle Abenteuer mit ungespeicherter History beim Herunterfahren.
+    Wird bei SIGTERM aufgerufen — Docker wartet standardmäßig 10s vor SIGKILL.
+    """
+    folders = [f for f in _last_activity if dm_engine._history.get(f)]
+    if not folders:
+        return
+    logger.info(f"Shutdown — speichere {len(folders)} aktive Abenteuer: {folders}")
+    for folder in folders:
+        try:
+            dm_engine.compress_session(folder, detailed=False)
+            logger.info(f"[{folder}] Shutdown-Save abgeschlossen")
+        except Exception as e:
+            logger.error(f"[{folder}] Shutdown-Save fehlgeschlagen: {e}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /mnt/coding/ttrpg-signal log --oneline -10)",
+      "Bash(git push *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git add *)"
+    ]
+  }
+}

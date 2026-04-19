@@ -329,6 +329,23 @@ def respond_setup(adventure_folder: str, player_name: str, message: str) -> str:
         return "*(Kurze Pause — gleich weiter.)*"
 
 
+def _flag_field_prompt_additions(adventure_folder: str) -> str:
+    """
+    Builds extraction prompt additions for flag-specific character fields.
+    Returns an empty string if no flag fields are defined.
+    """
+    fields = session_manager.load_character_fields(adventure_folder)
+    if not fields:
+        return ""
+    lines = ["\n\nZusätzlich extrahiere diese Flag-spezifischen Felder als Top-Level-Keys im JSON:"]
+    for f in fields:
+        flat = f["key"].split(".")[-1]
+        req = " [PFLICHTFELD — muss vorhanden sein]" if f.get("required") else " [falls im Gespräch erwähnt]"
+        detail = " Exakt übernehmen, nichts kürzen oder zusammenfassen." if f.get("detail") == "full" else ""
+        lines.append(f'- "{flat}" → speichern unter {f["key"]}{req}{detail}')
+    return "\n".join(lines)
+
+
 def extract_character_from_setup_history(adventure_folder: str, player_name: str) -> dict:
     """
     Extrahiert strukturierte Charakterdaten aus der Setup-Konversations-History.
@@ -344,6 +361,8 @@ def extract_character_from_setup_history(adventure_folder: str, player_name: str
         for msg in history
     )
 
+    flag_additions = _flag_field_prompt_additions(adventure_folder)
+
     prompt = (
         f"Analysiere dieses Charaktererstellungs-Gespräch für Spieler '{player_name}' "
         f"und extrahiere die Charakterdaten.\n\n"
@@ -356,12 +375,13 @@ def extract_character_from_setup_history(adventure_folder: str, player_name: str
         '"alter": "Alter", '
         '"herkunft": "Herkunft", '
         '"skills": [{"name": "Skillname", "beschreibung": "Kurze Beschreibung"}], '
-        '"will": "Ziel/Wunsch des Charakters", '
+        '"will": "Ziel/Wunsch des Charakters (Liste wenn mehrere)", '
         '"fuerchtet": "Angst/Schwäche", '
         '"geheimnis": "Geheimnis (falls erwähnt)", '
         '"praeferenzen": {"no_gos": [], "wishes": []}, '
         '"imagen_prompt": "Detailed English portrait prompt: appearance, clothing, style, background, lighting, mood"'
-        "}\n\n"
+        "}"
+        f"{flag_additions}\n\n"
         "Nur JSON zurückgeben. Felder weglassen wenn keine Info vorhanden."
     )
 
@@ -418,7 +438,7 @@ def _load_session_text_from_log(adventure_folder: str) -> str:
 def compress_session(adventure_folder: str, detailed: bool = False) -> None:
     """
     Komprimiert session.yaml.
-    detailed=True (bei !pause): generiert zusätzlich 'wiederaufnahme' —
+    detailed=True (bei !save): generiert zusätzlich 'wiederaufnahme' —
     eine atmosphärische Zusammenfassung für den nächsten Session-Start.
     """
     session = session_manager.load_session(adventure_folder)
@@ -510,6 +530,8 @@ def extract_characters_from_history(adventure_folder: str, player_names: list[st
     )
 
     players_str = ", ".join(player_names)
+    flag_additions = _flag_field_prompt_additions(adventure_folder)
+
     prompt = (
         f"Analysiere dieses Session-0-Gespräch und extrahiere die Charakterdaten "
         f"für die Spieler: {players_str}\n\n"
@@ -523,12 +545,13 @@ def extract_characters_from_history(adventure_folder: str, player_names: list[st
         '"alter": "Alter", '
         '"herkunft": "Herkunft", '
         '"skills": [{"name": "Skillname", "beschreibung": "Kurze Beschreibung"}], '
-        '"will": "Ziel/Wunsch des Charakters", '
+        '"will": "Ziel/Wunsch des Charakters (Liste wenn mehrere)", '
         '"fuerchtet": "Angst/Schwäche", '
         '"geheimnis": "Geheimnis (falls erwähnt)", '
         '"begleiter": "Wichtige Beziehung (falls erwähnt)", '
         '"imagen_prompt": "Detailed English portrait prompt: appearance, clothing, style, background, lighting, mood"'
-        "}}}\n\n"
+        "}}}"
+        f"{flag_additions}\n\n"
         "Nur JSON zurückgeben. Felder weglassen wenn keine Info vorhanden."
     )
 

@@ -140,7 +140,7 @@ docker compose up -d
    ```
 2. Abenteuer anlegen — erstellt Ordnerstruktur, Signal-Gruppe und schickt Willkommenstext:
    ```
-   !neu Mein Abenteuer @Spieler1 @Spieler2
+   !new Mein Abenteuer @Spieler1 @Spieler2
    ```
 3. Session 0 starten (Charaktererstellung + Weltenbau):
    ```
@@ -207,7 +207,7 @@ ttrpg/                         ← separates Repo, eingebunden via TTRPG_PATH
         ├── session.yaml
         ├── setting.yaml
         ├── npcs.yaml
-        ├── spielprotokoll.jsonl   ← Crash-sicheres Log (wird bei !pause geleert)
+        ├── spielprotokoll.jsonl   ← Crash-sicheres Log (wird bei !save geleert)
         └── characters/
             ├── held.yaml
             └── held_avatar.png
@@ -221,8 +221,8 @@ ttrpg/                         ← separates Repo, eingebunden via TTRPG_PATH
 |-----|----|------|
 | Jede Nachricht | `spielprotokoll.jsonl` | sofort (append) |
 | History bei Neustart | aus `spielprotokoll.jsonl` | beim ersten Zugriff |
-| Spielstand/Zusammenfassung | `session.yaml` | bei `!pause` (Claude komprimiert) |
-| JSONL | geleert | bei `!pause` |
+| Spielstand/Zusammenfassung | `session.yaml` | bei `!save` (Claude komprimiert) |
+| JSONL | geleert | bei `!save` |
 
 ---
 
