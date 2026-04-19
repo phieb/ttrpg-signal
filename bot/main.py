@@ -272,7 +272,7 @@ def is_registered_player(sender: str, players: dict) -> bool:
     return sender in players
 
 # Kommandos die jeder registrierte Spieler nutzen kann
-PLAYER_COMMANDS = {"!help", "!charakter", "!avatar", "!status"}
+PLAYER_COMMANDS = {"!help", "!charakter", "!avatar", "!status", "!bugreport"}
 
 
 # ── Kommandos ─────────────────────────────────────────────────────────────────
@@ -496,7 +496,7 @@ def cmd_new(args: list, reply_to: str, **_) -> str:
     setup_msgs = []
     for s in spieler_eintraege:
         sname, stelefon = s["name"], s["telefon"]
-        private_phones = list({SIGNAL_PHONE_NUMBER, ADMIN_PHONE_NUMBER, stelefon})
+        private_phones = list({SIGNAL_PHONE_NUMBER, stelefon})
         private_group_id = signal_client.create_group(f"{name} — {sname}", private_phones)
         if private_group_id:
             session_manager.set_player_private_gruppe(ordner, sname, private_group_id)
@@ -618,6 +618,28 @@ def cmd_invite(args: list, **_) -> str:
     return f"✅ **{name}** ({telefon}) registriert."
 
 
+def cmd_bugreport(args: list, sender: str, players: dict, **_) -> str:
+    """!bugreport <text> — speichert einen Bug-Report für die nächste Entwicklungssession."""
+    if not args:
+        return "Usage: !bugreport <Beschreibung des Bugs>"
+
+    text = " ".join(args)
+    sender_name = signal_client.get_sender_name(sender, players)
+    report_path = TTRPG / "bugreports.md"
+
+    ts = time.strftime("%Y-%m-%d %H:%M", time.localtime())
+    entry = f"\n---\n**{ts}** — {sender_name}\n{text}\n"
+
+    try:
+        with report_path.open("a", encoding="utf-8") as f:
+            f.write(entry)
+        logger.info(f"Bug-Report von {sender_name}: {text[:60]}")
+        return "🐛 Bug gespeichert — danke! Wird beim nächsten Coding-Sprint angeschaut."
+    except Exception as e:
+        logger.error(f"Bug-Report konnte nicht gespeichert werden: {e}")
+        return "❌ Fehler beim Speichern des Bug-Reports."
+
+
 def cmd_help(sender: str, **_) -> str:
     is_admin = sender == ADMIN_PHONE_NUMBER
     lines = ["**Verfügbare Kommandos:**", ""]
@@ -627,6 +649,7 @@ def cmd_help(sender: str, **_) -> str:
         "!status <name> — adventure details by name (in DM)",
         "!charakter — show your character sheet",
         "!avatar — show / regenerate your portrait",
+        "!bugreport <text> — report a bug",
         "!help — this help",
     ]
 
@@ -784,18 +807,19 @@ def cmd_charakter(sender: str, args: list, players: dict, reply_to: str,
 # ── Kommando-Router ───────────────────────────────────────────────────────────
 
 COMMANDS = {
-    "!save":      cmd_save,
-    "!status":    cmd_status,
-    "!new":       cmd_new,
-    "!session0":  cmd_session0,
-    "!dm":        cmd_dm,
-    "!charakter": cmd_charakter,
-    "!avatar":    cmd_avatar,
-    "!help":      cmd_help,
-    "!invite":    cmd_invite,
-    "!players":   cmd_players,
-    "!usage":     cmd_usage,
-    "!showme":    cmd_showme,
+    "!save":       cmd_save,
+    "!status":     cmd_status,
+    "!new":        cmd_new,
+    "!session0":   cmd_session0,
+    "!dm":         cmd_dm,
+    "!charakter":  cmd_charakter,
+    "!avatar":     cmd_avatar,
+    "!help":       cmd_help,
+    "!invite":     cmd_invite,
+    "!players":    cmd_players,
+    "!usage":      cmd_usage,
+    "!showme":     cmd_showme,
+    "!bugreport":  cmd_bugreport,
 }
 
 # !status needs adventure only in group context — handled inside the function
