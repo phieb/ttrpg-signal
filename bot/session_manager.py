@@ -27,6 +27,20 @@ def _save_yaml(path: Path, data: dict) -> None:
         logger.error(f"YAML konnte nicht gespeichert werden ({path}): {e}")
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    """
+    Merge two dicts recursively. override takes priority;
+    base fills in keys missing from override.
+    """
+    result = base.copy()
+    for key, val in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(val, dict):
+            result[key] = _deep_merge(result[key], val)
+        elif val not in (None, "", [], {}):
+            result[key] = val
+    return result
+
+
 def _get_nested(data: dict, path: str):
     """Navigate a nested dict by dot-path. Returns None if any key is missing."""
     val = data
@@ -248,15 +262,18 @@ def save_character(adventure_folder: str, player_name: str, char_data: dict) -> 
     slug = char_name.lower().replace(" ", "_")
     yaml_path = chars_dir / f"{slug}.yaml"
 
-    # Remove any stale YAML for this player (name may have changed during setup)
+    # Find any stale YAML for this player (name may have changed during setup)
+    # Merge its data as fallback so no info is lost, then delete it.
+    stale_base: dict = {}
     for existing in chars_dir.glob("*.yaml"):
         if existing == yaml_path:
             continue
         try:
             existing_data = yaml.safe_load(existing.read_text()) or {}
             if existing_data.get("charakter", {}).get("gespielt_von", "").lower() == player_name.lower():
+                stale_base = existing_data
                 existing.unlink()
-                logger.info(f"Veraltete Charakterdatei entfernt: {existing.name}")
+                logger.info(f"Veraltete Charakterdatei zusammengeführt und entfernt: {existing.name}")
         except Exception:
             pass
 
@@ -294,6 +311,10 @@ def save_character(adventure_folder: str, player_name: str, char_data: dict) -> 
         value = _get_from_extraction(char_data, field_def["key"])
         if value is not None:
             _set_nested(char_yaml, field_def["key"], value)
+
+    # Merge stale file as fallback — old data fills gaps, new data takes priority
+    if stale_base:
+        char_yaml = _deep_merge(stale_base, char_yaml)
 
     yaml_path.write_text(yaml.dump(char_yaml, allow_unicode=True, default_flow_style=False))
     logger.info(f"Charakter gespeichert: {yaml_path.name}")
