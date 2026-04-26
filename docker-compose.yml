@@ -4,10 +4,11 @@ services:
   # On subsequent starts it's a no-op (already cloned).
   ttrpg-init:
     image: alpine/git
+    entrypoint: /bin/sh
     volumes:
       - ./ttrpg:/mnt/ttrpg
     command: >
-      sh -c "
+      -c "
         [ -d /mnt/ttrpg/.git ] || git clone https://github.com/phieb/ttrpg.git /mnt/ttrpg &&
         [ -f /mnt/ttrpg/status.yaml ] || cp /mnt/ttrpg/status.example.yaml /mnt/ttrpg/status.yaml
       "

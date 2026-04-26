@@ -27,10 +27,21 @@ cd ttrpg-signal
 
 Das [ttrpg](https://github.com/phieb/ttrpg) Engine-Repo wird beim ersten `docker compose up` automatisch geklont — kein manueller Checkout nötig.
 
-### 2. signal-cli starten und registrieren
+### 2. `docker-compose.yml` anpassen
+
+Signal-CLI-Daten werden als Bind Mount eingebunden — Pfad anpassen:
+
+```yaml
+signal-cli:
+  volumes:
+    - /pfad/zu/signal-cli-data:/home/.local/share/signal-cli
+```
+
+Wer signal-cli schon laufen hat: einfach den bestehenden Datenpfad eintragen, fertig — keine Neuregistrierung nötig.
+
+### 3. signal-cli starten und registrieren
 
 ```bash
-cd /pfad/zu/ttrpg-signal
 docker compose up -d signal-cli
 ```
 
@@ -42,7 +53,7 @@ curl -s "http://localhost:8085/v1/qrcodelink?device_name=ttrpg-bot" -o qrcode.pn
 
 PNG öffnen → Signal → Einstellungen → Verknüpfte Geräte → Gerät hinzufügen → scannen.
 
-### 3. `.env` befüllen
+### 4. `.env` befüllen
 
 ```bash
 cp .env.example .env
@@ -62,14 +73,13 @@ ANTHROPIC_API_KEY=sk-ant-...   # immer benötigt (Charakter-Extraktion, Komprimi
 
 SIGNAL_PHONE_NUMBER=+43...      # Bot-Nummer (linked device)
 ADMIN_PHONE_NUMBER=+43...       # Wer !kommandos schicken darf
-TTRPG_PATH=/pfad/zu/ttrpg      # Wo das ttrpg-Repo liegt (lokal oder NFS-Mount)
 GCP_PROJECT=...                 # GCP Projekt-ID für Vertex AI (Avatar-Generierung)
 GCP_LOCATION=us-central1
 ```
 
 Alle Variablen mit Beschreibung und Defaults: siehe `.env.example`.
 
-### 4. GCP Service Account (für Avatar-Generierung)
+### 5. GCP Service Account (für Avatar-Generierung)
 
 ```bash
 gcloud iam service-accounts create ttrpg-bot \
@@ -85,17 +95,7 @@ gcloud iam service-accounts keys create gcp-sa.json \
 
 `gcp-sa.json` im Projektordner ablegen (in `.gitignore`, nie ins Git!).
 
-### 5. Starten
-
-```bash
-docker compose up -d
-```
-
-Beim ersten Start klont Docker automatisch das ttrpg Engine-Repo und legt `status.yaml` aus der Vorlage an. Spieler danach per `!invite` direkt über den Bot registrieren.
-
-### 6. Starten
-
-#### Addons einbinden
+### 6. Addons einbinden (optional)
 
 Addons werden als zusätzliche Volume-Mounts aktiviert — jeder Flavour eines Addons bekommt eine eigene Zeile in `docker-compose.yml`:
 
@@ -106,11 +106,13 @@ volumes:
 
 Kein Code-Change nötig — der Bot erkennt neue Flavour-Ordner automatisch. Wie du ein eigenes Addon baust steht in `ttrpg-adult/README.md` als Referenzimplementierung (Struktur, manifest.yaml, CHARACTER_FIELDS.yaml).
 
-### 7. Bot starten
+### 7. Starten
 
 ```bash
 docker compose up -d
 ```
+
+Beim ersten Start klont Docker automatisch das ttrpg Engine-Repo und legt `status.yaml` aus der Vorlage an. Spieler danach per `!invite` direkt über den Bot registrieren.
 
 ---
 
@@ -233,13 +235,10 @@ Was **nicht** in Git liegt und gesichert werden sollte:
 | Spieler-Registry | `players/*.yaml` |
 | Abenteuer-Übersicht | `status.yaml` |
 
-Einfachstes Backup — Volume-Inhalt auf den Host kopieren:
+Einfachstes Backup — `ttrpg/`-Ordner sichern (Bind Mount, direkt zugänglich):
 
 ```bash
-docker run --rm \
-  -v ttrpg-signal_ttrpg-data:/source \
-  -v /pfad/zu/backup:/backup \
-  alpine tar czf /backup/ttrpg-backup-$(date +%Y%m%d).tar.gz -C /source .
+tar czf /pfad/zu/backup/ttrpg-backup-$(date +%Y%m%d).tar.gz -C /pfad/zu/ttrpg-signal ttrpg
 ```
 
 ---
