@@ -33,9 +33,8 @@ services:
       # Mount flavour folders from addon repos into the engine.
       # Each flavour gets its own line. Clone the addon repo first, then uncomment.
       #
-      # Example — ttrpg-adult (mature + booktok flavours):
-      # - /path/to/ttrpg-adult/flavours/mature:/mnt/ttrpg/_engine/flavours/mature
-      # - /path/to/ttrpg-adult/flavours/booktok:/mnt/ttrpg/_engine/flavours/booktok
+      # Example — ttrpg-flavour-horror (horror flavour):
+      # - /path/to/ttrpg-flavour-horror/flavours/horror:/mnt/ttrpg/_engine/flavours/horror
 
   signal-cli:
     image: bbernhard/signal-cli-rest-api:latest
