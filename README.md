@@ -95,45 +95,30 @@ cp /pfad/zu/ttrpg/status.example.yaml /pfad/zu/ttrpg/status.yaml
 
 Spieler werden danach per `!invite` direkt über den Bot registriert.
 
-### 6. Repos klonen und `docker-compose.yml` anlegen
+### 6. `docker-compose.yml` anpassen
 
-Da das Repo privat ist, muss es lokal geklont sein — Docker baut direkt aus dem lokalen Ordner.
-`.env` und `gcp-sa.json` liegen im selben Ordner wie die `docker-compose.yml`.
-
-```bash
-git clone https://github.com/phieb/ttrpg-signal.git /pfad/zu/ttrpg-signal
-```
+Eine fertige `docker-compose.yml` liegt im Repo. Passe die Volume-Pfade an deine lokale Umgebung an:
 
 ```yaml
-services:
-
-  signal-cli:
-    image: bbernhard/signal-cli-rest-api:latest
-    container_name: signal-cli
-    restart: unless-stopped
-    environment:
-      - MODE=native
-    ports:
-      - "8085:8080"
-    volumes:
-      - ./signal-cli-data:/home/.local/share/signal-cli
-
-  ttrpg-bot:
-    build: /pfad/zu/ttrpg-signal          # lokaler Clone des privaten Repos
-    container_name: ttrpg-bot
-    restart: unless-stopped
-    depends_on:
-      - signal-cli
-    env_file:
-      - .env
-    volumes:
-      - /pfad/zu/ttrpg:/mnt/ttrpg          # ttrpg-Repo → im Container immer /mnt/ttrpg
-      - ./gcp-sa.json:/app/gcp-sa.json:ro
-    environment:
-      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-sa.json
+volumes:
+  - /pfad/zu/ttrpg:/mnt/ttrpg
+  - ./gcp-sa.json:/app/gcp-sa.json:ro
 ```
 
-> `TTRPG_PATH` in der `.env` muss auf den Container-Pfad zeigen, also `/mnt/ttrpg`.
+> `TTRPG_PATH` in der `.env` muss auf den Container-Pfad zeigen: `/mnt/ttrpg`
+
+#### Addons einbinden
+
+Addons (z.B. [ttrpg-adult](https://github.com/phieb/ttrpg-adult)) werden als zusätzliche Volume-Mounts aktiviert — jeder Flavour des Addons bekommt eine eigene Zeile:
+
+```yaml
+volumes:
+  - /pfad/zu/ttrpg:/mnt/ttrpg
+  - /pfad/zu/ttrpg-adult/flavours/mature:/mnt/ttrpg/_engine/flavours/mature
+  - /pfad/zu/ttrpg-adult/flavours/booktok:/mnt/ttrpg/_engine/flavours/booktok
+```
+
+Kein Code-Change nötig — der Bot erkennt neue Flavour-Ordner automatisch.
 
 ### 7. Bot starten
 
@@ -151,8 +136,9 @@ docker compose up -d
    ```
 2. Abenteuer anlegen — erstellt Ordnerstruktur, Signal-Gruppe und schickt Willkommenstext:
    ```
-   !new Mein Abenteuer @Spieler1 @Spieler2
+   !new Mein Abenteuer @Spieler1 @Spieler2 --fantasy
    ```
+   Optionale Flavours mit `--name` anhängen. Addon-Flavours funktionieren genauso sobald das Addon eingebunden ist.
 3. Session 0 starten (Charaktererstellung + Weltenbau):
    ```
    !session0
