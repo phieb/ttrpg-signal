@@ -23,21 +23,29 @@ IMAGEN_MODEL = "imagen-4.0-fast-generate-001"
 _claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 
-def _get_portrait_prompt(adventure_folder: str, char_name: str) -> str | None:
+def _prompt_path(adventure_folder: str, char_name: str) -> Path:
+    slug = char_name.lower().replace(" ", "_")
+    return TTRPG / "adventures" / adventure_folder / "characters" / f"{slug}_avatar.txt"
+
+
+def get_portrait_prompt(adventure_folder: str, char_name: str) -> str | None:
     """
     Sucht den Portrait-Prompt für einen Charakter:
-    1. [charname]_portrait_prompt.txt
-    2. imagen_prompt in charakter YAML
+    1. [charname]_avatar.txt
+    2. [charname]_portrait_prompt.txt  (legacy)
+    3. imagen_prompt in charakter YAML
     """
     base = TTRPG / "adventures" / adventure_folder / "characters"
-
-    # Variante 1: dedizierte .txt Datei
     slug = char_name.lower().replace(" ", "_")
-    txt_file = base / f"{slug}_portrait_prompt.txt"
+
+    txt_file = _prompt_path(adventure_folder, char_name)
     if txt_file.exists():
         return txt_file.read_text().strip()
 
-    # Variante 2: imagen_prompt im YAML
+    legacy = base / f"{slug}_portrait_prompt.txt"
+    if legacy.exists():
+        return legacy.read_text().strip()
+
     for yaml_file in base.glob("*.yaml"):
         char = session_manager._load_yaml(yaml_file)
         if char.get("charakter", {}).get("name", "").lower() == char_name.lower():
@@ -46,6 +54,10 @@ def _get_portrait_prompt(adventure_folder: str, char_name: str) -> str | None:
                 return prompt
 
     return None
+
+
+def save_portrait_prompt(adventure_folder: str, char_name: str, prompt: str) -> None:
+    _prompt_path(adventure_folder, char_name).write_text(prompt.strip())
 
 
 def _run_imagen(prompt: str, output_path: Path, aspect_ratio: str = "1:1") -> bool:
@@ -68,7 +80,7 @@ def generate_avatar(adventure_folder: str, char_name: str) -> Path | None:
     Speichert es als [charname]_avatar.png im characters/ Ordner.
     Gibt den Pfad zurück, oder None bei Fehler.
     """
-    prompt = _get_portrait_prompt(adventure_folder, char_name)
+    prompt = get_portrait_prompt(adventure_folder, char_name)
     if not prompt:
         logger.warning(f"Kein Portrait-Prompt für {char_name} gefunden")
         return None
@@ -85,44 +97,66 @@ def generate_avatar(adventure_folder: str, char_name: str) -> Path | None:
 
 
 def generate_and_send_avatars(adventure_folder: str, reply_to: str,
-                               char_name_filter: str | None = None) -> None:
+                               char_name: str | None = None,
+                               subcommand: str | None = None,
+                               new_prompt: str | None = None) -> None:
     """
-    !avatar          → Liste der Charakternamen
-    !avatar <name>   → Avatar für diesen Charakter generieren
+    !avatar                        → show own avatar + current prompt
+    !avatar regen                  → regenerate with existing prompt
+    !avatar prompt                 → show current prompt
+    !avatar prompt <text>          → update prompt and regenerate
     """
-    characters = session_manager.load_characters(adventure_folder)
-    if not characters:
-        signal_client.send(reply_to, "❌ Keine Charaktere gefunden.")
+    if not char_name:
+        signal_client.send(reply_to, "❌ Kein Charakter angegeben.")
         return
 
-    # Kein Name → nur Liste anzeigen
-    if not char_name_filter:
-        lines = ["**Verfügbare Charaktere:**", ""]
-        for c in characters:
-            name = c.get("charakter", {}).get("name", "?")
-            lines.append(f"• {name}")
-        lines += ["", "Tippe *!avatar <name>* um ein Portrait zu generieren."]
-        signal_client.send(reply_to, "\n".join(lines))
+    # ── show prompt ──────────────────────────────────────────────────────────
+    if subcommand == "prompt" and not new_prompt:
+        prompt = get_portrait_prompt(adventure_folder, char_name)
+        if prompt:
+            signal_client.send(reply_to, f"🖼 Aktueller Avatar-Prompt für **{char_name}**:\n\n{prompt}")
+        else:
+            signal_client.send(reply_to, f"❌ Kein Avatar-Prompt für **{char_name}** gespeichert.")
         return
 
-    # Name angegeben → Avatar generieren
-    match = next(
-        (c for c in characters
-         if c.get("charakter", {}).get("name", "").lower() == char_name_filter.lower()),
-        None
-    )
-    if not match:
-        names = ", ".join(c.get("charakter", {}).get("name", "?") for c in characters)
-        signal_client.send(reply_to, f"❌ '{char_name_filter}' nicht gefunden.\nVerfügbar: {names}")
+    # ── update prompt + regenerate ───────────────────────────────────────────
+    if subcommand == "prompt" and new_prompt:
+        save_portrait_prompt(adventure_folder, char_name, new_prompt)
+        signal_client.send(reply_to, f"✅ Prompt gespeichert. Generiere Avatar für **{char_name}**...")
+        avatar_path = generate_avatar(adventure_folder, char_name)
+        if avatar_path:
+            signal_client.send_file(reply_to, str(avatar_path), f"🧙 {char_name}")
+        else:
+            signal_client.send(reply_to, "⚠️ Avatar konnte nicht generiert werden.")
         return
 
-    char_name = match["charakter"]["name"]
-    signal_client.send(reply_to, f"🎨 Generiere Avatar für **{char_name}**... kurz warten!")
-    avatar_path = generate_avatar(adventure_folder, char_name)
-    if avatar_path:
+    # ── regen ────────────────────────────────────────────────────────────────
+    if subcommand == "regen":
+        prompt = get_portrait_prompt(adventure_folder, char_name)
+        if not prompt:
+            signal_client.send(reply_to, f"❌ Kein Prompt für **{char_name}** — bitte zuerst *!avatar prompt <text>* setzen.")
+            return
+        signal_client.send(reply_to, f"🎨 Regeneriere Avatar für **{char_name}**...")
+        avatar_path = generate_avatar(adventure_folder, char_name)
+        if avatar_path:
+            signal_client.send_file(reply_to, str(avatar_path), f"🧙 {char_name}")
+        else:
+            signal_client.send(reply_to, "⚠️ Avatar konnte nicht generiert werden.")
+        return
+
+    # ── default: show current avatar + prompt ────────────────────────────────
+    slug = char_name.lower().replace(" ", "_")
+    avatar_path = TTRPG / "adventures" / adventure_folder / "characters" / f"{slug}_avatar.png"
+    if avatar_path.exists():
         signal_client.send_file(reply_to, str(avatar_path), f"🧙 {char_name}")
     else:
-        signal_client.send(reply_to, f"⚠️ Avatar für {char_name} konnte nicht generiert werden.")
+        signal_client.send(reply_to, f"_(Noch kein Avatar für **{char_name}** vorhanden.)_")
+
+    prompt = get_portrait_prompt(adventure_folder, char_name)
+    if prompt:
+        signal_client.send(reply_to, f"🖼 Prompt:\n{prompt}\n\n*Tippe !avatar regen um neu zu generieren oder !avatar prompt <text> um den Prompt zu ändern.*")
+    else:
+        signal_client.send(reply_to, "*Kein Prompt gesetzt. Tippe !avatar prompt <text> um einen zu setzen.*")
 
 
 # ── Szenen-Bild (!showme) ────────────────────────────────────────────────────

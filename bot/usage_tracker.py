@@ -1,10 +1,12 @@
 """
-API-Nutzungs-Tracking für Anthropic (Claude) und Vertex AI (Imagen).
+API-Nutzungs-Tracking für Anthropic (Claude), OpenAI, Gemini und Vertex AI (Imagen).
 Persistiert in TTRPG_PATH/usage.json — bleibt über Bot-Neustarts erhalten.
 
 Kosten (Stand 2025):
-  Claude Haiku 4.5: Input $0.80/M, Output $4.00/M, Cache-Read $0.08/M, Cache-Write $1.00/M
-  Imagen 4 Fast:    $0.02/Bild
+  Claude Haiku 4.5:  Input $0.80/M, Output $4.00/M, Cache-Read $0.08/M, Cache-Write $1.00/M
+  GPT-4o:            Input $2.50/M, Output $10.00/M
+  Gemini 2.0 Flash:  Input $0.10/M, Output $0.40/M
+  Imagen 4 Fast:     $0.02/Bild
 """
 
 import json
@@ -25,6 +27,14 @@ _ANTHROPIC_COST = {
     "cache_read":  0.08 / 1_000_000,
     "cache_write": 1.00 / 1_000_000,
 }
+_OPENAI_COST = {
+    "input":  2.50 / 1_000_000,
+    "output": 10.00 / 1_000_000,
+}
+_GEMINI_COST = {
+    "input":  0.10 / 1_000_000,
+    "output": 0.40 / 1_000_000,
+}
 _IMAGEN_COST_PER_IMAGE = 0.02
 
 
@@ -34,8 +44,12 @@ def _load() -> dict:
             return json.loads(USAGE_FILE.read_text(encoding="utf-8"))
     except Exception as e:
         logger.warning(f"usage.json lesen fehlgeschlagen: {e}")
-    return {"anthropic": {"total": _empty_anthropic(), "by_month": {}},
-            "vertex":    {"total": _empty_vertex(),    "by_month": {}}}
+    return {
+        "anthropic": {"total": _empty_anthropic(), "by_month": {}},
+        "openai":    {"total": _empty_tokens(),    "by_month": {}},
+        "gemini":    {"total": _empty_tokens(),    "by_month": {}},
+        "vertex":    {"total": _empty_vertex(),    "by_month": {}},
+    }
 
 
 def _save(data: dict) -> None:
@@ -47,6 +61,10 @@ def _save(data: dict) -> None:
 
 def _empty_anthropic() -> dict:
     return {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0}
+
+
+def _empty_tokens() -> dict:
+    return {"input": 0, "output": 0}
 
 
 def _empty_vertex() -> dict:
@@ -67,6 +85,22 @@ def track_anthropic(input_tokens: int, output_tokens: int,
         bucket["output"]      += output_tokens
         bucket["cache_read"]  += cache_read
         bucket["cache_write"] += cache_write
+    _save(data)
+
+
+def track_dm(provider: str, input_tokens: int, output_tokens: int) -> None:
+    """Tracks a DM storytelling call for any provider."""
+    if provider == "anthropic":
+        track_anthropic(input_tokens, output_tokens)
+        return
+    key = provider  # "openai" or "gemini"
+    data = _load()
+    if key not in data:
+        data[key] = {"total": _empty_tokens(), "by_month": {}}
+    for bucket in (data[key]["total"],
+                   data[key]["by_month"].setdefault(_month(), _empty_tokens())):
+        bucket["input"]  += input_tokens
+        bucket["output"] += output_tokens
     _save(data)
 
 
@@ -94,29 +128,45 @@ def _fmt_tokens(n: int) -> str:
     return str(n)
 
 
+def _tokens_cost(b: dict, cost: dict) -> float:
+    return b["input"] * cost["input"] + b["output"] * cost["output"]
+
+
+def _tokens_line(b: dict) -> str:
+    return f"{_fmt_tokens(b['input'])} input · {_fmt_tokens(b['output'])} output"
+
+
 def get_summary() -> str:
     data = _load()
     month = _month()
     lines = ["📊 **API-Nutzung**\n"]
 
-    # ── Anthropic ────────────────────────────────────────────────────────────
+    # ── Anthropic (utility: extraction, compression) ──────────────────────────
     at = data["anthropic"]["total"]
     am = data["anthropic"]["by_month"].get(month, _empty_anthropic())
-    lines.append("**Anthropic (Claude Haiku)**")
-    lines.append(
-        f"Gesamt:  {_fmt_tokens(at['input'])} input · "
-        f"{_fmt_tokens(at['output'])} output · "
-        f"{_fmt_tokens(at['cache_read'])} cache-read · "
-        f"{_fmt_tokens(at['cache_write'])} cache-write"
-    )
-    lines.append(
-        f"{month}:  {_fmt_tokens(am['input'])} input · "
-        f"{_fmt_tokens(am['output'])} output · "
-        f"{_fmt_tokens(am['cache_read'])} cache-read · "
-        f"{_fmt_tokens(am['cache_write'])} cache-write"
-    )
-    lines.append(f"Kosten {month}: ~${_anthropic_cost(am):.3f}")
-    lines.append(f"Kosten gesamt: ~${_anthropic_cost(at):.3f}\n")
+    lines.append("**Anthropic (Claude Haiku — utility)**")
+    lines.append(f"Gesamt:  {_fmt_tokens(at['input'])} input · {_fmt_tokens(at['output'])} output · "
+                 f"cache-read {_fmt_tokens(at['cache_read'])} · cache-write {_fmt_tokens(at['cache_write'])}")
+    lines.append(f"{month}:  {_fmt_tokens(am['input'])} input · {_fmt_tokens(am['output'])} output")
+    lines.append(f"Kosten {month}: ~${_anthropic_cost(am):.3f} | gesamt: ~${_anthropic_cost(at):.3f}\n")
+
+    # ── OpenAI ────────────────────────────────────────────────────────────────
+    ot = data.get("openai", {}).get("total", _empty_tokens())
+    om = data.get("openai", {}).get("by_month", {}).get(month, _empty_tokens())
+    if ot["input"] or ot["output"]:
+        lines.append("**OpenAI (GPT-4o — DM)**")
+        lines.append(f"Gesamt:  {_tokens_line(ot)}")
+        lines.append(f"{month}:  {_tokens_line(om)}")
+        lines.append(f"Kosten {month}: ~${_tokens_cost(om, _OPENAI_COST):.3f} | gesamt: ~${_tokens_cost(ot, _OPENAI_COST):.3f}\n")
+
+    # ── Gemini ────────────────────────────────────────────────────────────────
+    gt = data.get("gemini", {}).get("total", _empty_tokens())
+    gm = data.get("gemini", {}).get("by_month", {}).get(month, _empty_tokens())
+    if gt["input"] or gt["output"]:
+        lines.append("**Gemini (DM)**")
+        lines.append(f"Gesamt:  {_tokens_line(gt)}")
+        lines.append(f"{month}:  {_tokens_line(gm)}")
+        lines.append(f"Kosten {month}: ~${_tokens_cost(gm, _GEMINI_COST):.3f} | gesamt: ~${_tokens_cost(gt, _GEMINI_COST):.3f}\n")
 
     # ── Vertex AI ─────────────────────────────────────────────────────────────
     vt = data["vertex"]["total"]

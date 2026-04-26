@@ -3,20 +3,23 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from collections import defaultdict
+from string import Template
 
 import anthropic
 
+import llm_client
 import session_manager
 import usage_tracker
 from config import ANTHROPIC_API_KEY, TTRPG_PATH, MAX_CONTEXT_TOKENS, HISTORY_MESSAGES, MAX_LOG_LINES
 
 logger = logging.getLogger(__name__)
 
-MODEL = "claude-haiku-4-5-20251001"
+# Haiku for structured tasks (extraction, compression) — always Anthropic
+_UTILITY_MODEL = "claude-haiku-4-5-20251001"
 TTRPG = Path(TTRPG_PATH)
 SESSION_SAVE_INTERVAL = 10  # alle N Interaktionen session.yaml updaten
 
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+_anthropic = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 # Konversations-History pro Abenteuer
 # { adventure_folder: [ {"role": "user"|"assistant", "content": "..."}, ... ] }
@@ -48,23 +51,28 @@ def _load_top_rules() -> str:
     return _load_engine_file("TOP_DM_REGELN.md")
 
 
-def _load_flag_prompts(adventure_folder: str, phase: str = "DUNGEON_MASTER") -> str:
+def _load_prompt_template(name: str) -> str:
+    """Lädt ein Prompt-Template aus _engine/templates/."""
+    return (TTRPG / "_engine" / "templates" / name).read_text()
+
+
+def _load_flavour_prompts(adventure_folder: str, phase: str = "DUNGEON_MASTER") -> str:
     """
-    Lädt alle aktiven Flag-Prompts für die angegebene Phase.
-    Sucht in flags/[flag]/[phase].md — z.B. flags/booktok/CHARACTER_SETUP.md
-    Jeder Flag lebt in einem eigenen Unterordner.
+    Lädt alle aktiven Flavour-Prompts für die angegebene Phase.
+    Sucht in flavours/[flavour]/[phase].md — z.B. flavours/booktok/CHARACTER_SETUP.md
+    Jeder Flavour lebt in einem eigenen Unterordner.
     """
-    flags = session_manager.load_flags(adventure_folder)
-    flags_dir = TTRPG / "_engine" / "flags"
+    flavours = session_manager.load_flavours(adventure_folder)
+    flavours_dir = TTRPG / "_engine" / "flavours"
     parts = []
-    for flag, enabled in flags.items():
+    for flavour, enabled in flavours.items():
         if not enabled:
             continue
-        prompt_path = flags_dir / flag / f"{phase}.md"
+        prompt_path = flavours_dir / flavour / f"{phase}.md"
         if prompt_path.exists():
             parts.append(prompt_path.read_text())
         else:
-            logger.debug(f"Kein {phase}.md für Flag '{flag}' — übersprungen")
+            logger.debug(f"Kein {phase}.md für Flavour '{flavour}' — übersprungen")
     return "\n\n".join(parts)
 
 
@@ -87,13 +95,13 @@ _SIGNAL_INSTRUCTIONS = (
 def _build_system(adventure_folder: str, phase: str = "DUNGEON_MASTER") -> list:
     """System-Blöcke für reguläres Spiel und Session 0 (Gruppenkanal)."""
     dm_prompt = _load_dm_prompt()
-    flag_prompts = _load_flag_prompts(adventure_folder, phase=phase)
+    flavour_prompts = _load_flavour_prompts(adventure_folder, phase=phase)
     context = session_manager.build_context(adventure_folder)
     top_rules = _load_top_rules()
 
     cached_text = dm_prompt + _SIGNAL_INSTRUCTIONS
-    if flag_prompts:
-        cached_text += "\n\n" + flag_prompts
+    if flavour_prompts:
+        cached_text += "\n\n" + flavour_prompts
 
     dynamic_parts = []
     if top_rules:
@@ -116,7 +124,7 @@ def _build_system(adventure_folder: str, phase: str = "DUNGEON_MASTER") -> list:
 def _build_system_setup(adventure_folder: str, player_name: str, setting: dict) -> list:
     """System-Blöcke für den privaten CHARACTER_SETUP Kanal."""
     setup_prompt = _load_character_setup_prompt()
-    flag_prompts = _load_flag_prompts(adventure_folder, phase="CHARACTER_SETUP")
+    flavour_prompts = _load_flavour_prompts(adventure_folder, phase="CHARACTER_SETUP")
 
     # Kontext: Abenteuer-Setting + Spieler-Info (kein voller session-Kontext nötig)
     welt = setting.get("welt", {})
@@ -140,8 +148,8 @@ def _build_system_setup(adventure_folder: str, player_name: str, setting: dict) 
         context_lines.append("verfuegbare_spezies: " + ", ".join(verfuegbare_spezies))
 
     cached_text = setup_prompt + _SIGNAL_INSTRUCTIONS
-    if flag_prompts:
-        cached_text += "\n\n" + flag_prompts
+    if flavour_prompts:
+        cached_text += "\n\n" + flavour_prompts
 
     return [
         {
@@ -250,36 +258,23 @@ def respond(adventure_folder: str, sender_name: str, message: str, phase: str = 
     _trim_history(adventure_folder)
 
     try:
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=MAX_CONTEXT_TOKENS,
-            system=_build_system(adventure_folder, phase=phase),
-            messages=_history[adventure_folder],
-        )
+        resp = llm_client.chat(_build_system(adventure_folder, phase=phase), _history[adventure_folder])
+        dm_reply = resp.text
 
-        dm_reply = response.content[0].text
-
-        # DM-Antwort loggen und zur History hinzufügen
         _log_message(adventure_folder, "assistant", "DM", dm_reply)
         _history[adventure_folder].append({"role": "assistant", "content": dm_reply})
 
-        cache_read  = getattr(response.usage, "cache_read_input_tokens", 0)
-        cache_write = getattr(response.usage, "cache_creation_input_tokens", 0)
         logger.info(
-            f"[{adventure_folder}] Tokens: input={response.usage.input_tokens} "
-            f"output={response.usage.output_tokens} "
-            f"cache_read={cache_read} cache_write={cache_write}"
+            f"[{adventure_folder}] [{resp.provider}] Tokens: "
+            f"input={resp.input_tokens} output={resp.output_tokens}"
         )
-        usage_tracker.track_anthropic(
-            response.usage.input_tokens, response.usage.output_tokens,
-            cache_read, cache_write,
-        )
+        usage_tracker.track_dm(resp.provider, resp.input_tokens, resp.output_tokens)
 
         _maybe_log_checkpoint(adventure_folder)
         return dm_reply
 
-    except anthropic.APIError as e:
-        logger.error(f"Claude API Fehler: {e}")
+    except Exception as e:
+        logger.error(f"DM API Fehler: {e}")
         _history[adventure_folder].pop()
         return "*(Der DM räuspert sich — kurze Pause, gleich weiter.)*"
 
@@ -299,45 +294,37 @@ def respond_setup(adventure_folder: str, player_name: str, message: str) -> str:
     setting = session_manager.load_setting(adventure_folder)
 
     try:
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=MAX_CONTEXT_TOKENS,
-            system=_build_system_setup(adventure_folder, player_name, setting),
-            messages=_history[history_key],
+        resp = llm_client.chat(
+            _build_system_setup(adventure_folder, player_name, setting),
+            _history[history_key],
         )
-        dm_reply = response.content[0].text
+        dm_reply = resp.text
 
         _log_message(adventure_folder, "assistant", "DM", f"[SETUP] {dm_reply}")
         _history[history_key].append({"role": "assistant", "content": dm_reply})
 
-        cache_read  = getattr(response.usage, "cache_read_input_tokens", 0)
-        cache_write = getattr(response.usage, "cache_creation_input_tokens", 0)
         logger.info(
-            f"[{adventure_folder}/setup/{player_name}] Tokens: input={response.usage.input_tokens} "
-            f"output={response.usage.output_tokens} "
-            f"cache_read={cache_read} cache_write={cache_write}"
+            f"[{adventure_folder}/setup/{player_name}] [{resp.provider}] Tokens: "
+            f"input={resp.input_tokens} output={resp.output_tokens}"
         )
-        usage_tracker.track_anthropic(
-            response.usage.input_tokens, response.usage.output_tokens,
-            cache_read, cache_write,
-        )
+        usage_tracker.track_dm(resp.provider, resp.input_tokens, resp.output_tokens)
         return dm_reply
 
-    except anthropic.APIError as e:
-        logger.error(f"Claude API Fehler (Setup): {e}")
+    except Exception as e:
+        logger.error(f"DM API Fehler (Setup): {e}")
         _history[history_key].pop()
         return "*(Kurze Pause — gleich weiter.)*"
 
 
-def _flag_field_prompt_additions(adventure_folder: str) -> str:
+def _flavour_field_prompt_additions(adventure_folder: str) -> str:
     """
-    Builds extraction prompt additions for flag-specific character fields.
-    Returns an empty string if no flag fields are defined.
+    Builds extraction prompt additions for flavour-specific character fields.
+    Returns an empty string if no flavour fields are defined.
     """
     fields = session_manager.load_character_fields(adventure_folder)
     if not fields:
         return ""
-    lines = ["\n\nZusätzlich extrahiere diese Flag-spezifischen Felder als Top-Level-Keys im JSON:"]
+    lines = ["\n\nZusätzlich extrahiere diese Felder als Top-Level-Keys im JSON:"]
     for f in fields:
         flat = f["key"].split(".")[-1]
         req = " [PFLICHTFELD — muss vorhanden sein]" if f.get("required") else " [falls im Gespräch erwähnt]"
@@ -361,33 +348,17 @@ def extract_character_from_setup_history(adventure_folder: str, player_name: str
         for msg in history
     )
 
-    flag_additions = _flag_field_prompt_additions(adventure_folder)
+    flavour_additions = _flavour_field_prompt_additions(adventure_folder)
 
-    prompt = (
-        f"Analysiere dieses Charaktererstellungs-Gespräch für Spieler '{player_name}' "
-        f"und extrahiere die Charakterdaten.\n\n"
-        f"Gespräch:\n{conversation}\n\n"
-        "Gib die extrahierten Daten als JSON zurück — nur Felder die tatsächlich "
-        "im Gespräch vorkommen, keine Erfindungen:\n"
-        '{"name": "Charaktername", '
-        '"wer_bist_du": "Kurze Charakterbeschreibung", '
-        '"aussehen": "Aussehen", '
-        '"alter": "Alter", '
-        '"herkunft": "Herkunft", '
-        '"skills": [{"name": "Skillname", "beschreibung": "Kurze Beschreibung"}], '
-        '"will": "Ziel/Wunsch des Charakters (Liste wenn mehrere)", '
-        '"fuerchtet": "Angst/Schwäche", '
-        '"geheimnis": "Geheimnis (falls erwähnt)", '
-        '"praeferenzen": {"no_gos": [], "wishes": []}, '
-        '"imagen_prompt": "Detailed English portrait prompt: appearance, clothing, style, background, lighting, mood"'
-        "}"
-        f"{flag_additions}\n\n"
-        "Nur JSON zurückgeben. Felder weglassen wenn keine Info vorhanden."
+    prompt = Template(_load_prompt_template("extract_character.md")).substitute(
+        player_name=player_name,
+        conversation=conversation,
+        flavour_additions=flavour_additions,
     )
 
     try:
-        response = client.messages.create(
-            model=MODEL,
+        response = _anthropic.messages.create(
+            model=_UTILITY_MODEL,
             max_tokens=1500,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -464,30 +435,20 @@ def compress_session(adventure_folder: str, detailed: bool = False) -> None:
             logger.info(f"[{adventure_folder}] Nichts zu komprimieren")
             return
 
-    wiederaufnahme_feld = (
-        '  "wiederaufnahme": "3-5 atmosphärische Sätze die den DM beim nächsten Start '
-        'direkt in die Szene holen — Stimmung, Spannung, offene Fäden, wo die Gruppe steht",\n'
+    wiederaufnahme_field = (
+        '\n  "wiederaufnahme": "3-5 atmosphärische Sätze die den DM beim nächsten Start '
+        'direkt in die Szene holen — Stimmung, Spannung, offene Fäden, wo die Gruppe steht",'
         if detailed else ""
     )
 
-    prompt = (
-        "Du bist ein Archiv-Assistent für ein TTRPG-Abenteuer. "
-        "Fasse den Spielverlauf kompakt zusammen — bewahre alle wichtigen Namen, "
-        "Orte, Gegenstände und Plot-Punkte. Ältere Ereignisse kürzer, neuere etwas detaillierter.\n\n"
-        "Antworte NUR mit einem JSON-Objekt:\n"
-        "{\n"
-        '  "aktueller_ort": "Wo sind die Charaktere gerade",\n'
-        '  "letzte_szene": "1-2 Sätze was zuletzt passiert ist",\n'
-        f"{wiederaufnahme_feld}"
-        '  "letzte_ereignisse": ["Ereignis 1", "Ereignis 2", ...],\n'
-        '  "history": ["Ältere Zusammenfassung 1", ...]\n'
-        "}\n\n"
-        f"{quelle}"
+    prompt = Template(_load_prompt_template("compress_session.md")).substitute(
+        wiederaufnahme_field=wiederaufnahme_field,
+        source=quelle,
     )
 
     try:
-        response = client.messages.create(
-            model=MODEL,
+        response = _anthropic.messages.create(
+            model=_UTILITY_MODEL,
             max_tokens=1200 if detailed else 800,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -530,34 +491,17 @@ def extract_characters_from_history(adventure_folder: str, player_names: list[st
     )
 
     players_str = ", ".join(player_names)
-    flag_additions = _flag_field_prompt_additions(adventure_folder)
+    flavour_additions = _flavour_field_prompt_additions(adventure_folder)
 
-    prompt = (
-        f"Analysiere dieses Session-0-Gespräch und extrahiere die Charakterdaten "
-        f"für die Spieler: {players_str}\n\n"
-        f"Gespräch:\n{conversation}\n\n"
-        "Gib die extrahierten Daten als JSON zurück — nur Felder die tatsächlich "
-        "im Gespräch vorkommen, keine Erfindungen:\n"
-        '{"charaktere": {"SpielerName": {'
-        '"name": "Charaktername", '
-        '"wer_bist_du": "Kurze Charakterbeschreibung", '
-        '"aussehen": "Aussehen", '
-        '"alter": "Alter", '
-        '"herkunft": "Herkunft", '
-        '"skills": [{"name": "Skillname", "beschreibung": "Kurze Beschreibung"}], '
-        '"will": "Ziel/Wunsch des Charakters (Liste wenn mehrere)", '
-        '"fuerchtet": "Angst/Schwäche", '
-        '"geheimnis": "Geheimnis (falls erwähnt)", '
-        '"begleiter": "Wichtige Beziehung (falls erwähnt)", '
-        '"imagen_prompt": "Detailed English portrait prompt: appearance, clothing, style, background, lighting, mood"'
-        "}}}"
-        f"{flag_additions}\n\n"
-        "Nur JSON zurückgeben. Felder weglassen wenn keine Info vorhanden."
+    prompt = Template(_load_prompt_template("extract_characters_session0.md")).substitute(
+        players_str=players_str,
+        conversation=conversation,
+        flavour_additions=flavour_additions,
     )
 
     try:
-        response = client.messages.create(
-            model=MODEL,
+        response = _anthropic.messages.create(
+            model=_UTILITY_MODEL,
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}],
         )

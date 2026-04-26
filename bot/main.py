@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 3
 TTRPG = Path(TTRPG_PATH)
+_SETUP_COMPLETE_MARKER = "[SETUP_COMPLETE]"
 
 # ── Graceful Shutdown ─────────────────────────────────────────────────────────
 
@@ -271,10 +272,6 @@ def find_player_phone(name: str) -> str | None:
 def is_registered_player(sender: str, players: dict) -> bool:
     return sender in players
 
-# Kommandos die jeder registrierte Spieler nutzen kann
-PLAYER_COMMANDS = {"!help", "!charakter", "!avatar", "!status", "!bugreport"}
-
-
 # ── Kommandos ─────────────────────────────────────────────────────────────────
 
 def cmd_usage(**_) -> str:
@@ -388,21 +385,44 @@ def cmd_status(args: list, sender: str, adventure_folder: str | None,
     return "\n".join(lines)
 
 
+def _resolve_flavour_dependencies(flavour_namen: list[str]) -> list[str]:
+    """Reads manifest.yaml for each flavour and adds any transitively required flavours."""
+    flavours_dir = TTRPG / "_engine" / "flavours"
+    resolved = list(flavour_namen)
+    changed = True
+    while changed:
+        changed = False
+        for flavour in list(resolved):
+            manifest_path = flavours_dir / flavour / "manifest.yaml"
+            if not manifest_path.exists():
+                continue
+            try:
+                manifest = yaml.safe_load(manifest_path.read_text()) or {}
+                for req in manifest.get("requires", []):
+                    if req not in resolved:
+                        resolved.append(req)
+                        logger.info(f"Flavour '{flavour}' benötigt '{req}' — automatisch aktiviert")
+                        changed = True
+            except Exception as e:
+                logger.warning(f"manifest.yaml für Flavour '{flavour}' konnte nicht geladen werden: {e}")
+    return resolved
+
+
 def cmd_new(args: list, reply_to: str, **_) -> str:
     if not args:
-        return "Usage: !new <adventure-name> [@Player1 ...] [--flag1 --flag2 ...]"
+        return "Usage: !new <adventure-name> [@Player1 ...] [--flavour1 --flavour2 ...]"
 
-    # Args aufteilen: Name | @Spieler-Token | --flag-Token (Reihenfolge egal)
+    # Args aufteilen: Name | @Spieler-Token | --flavour-Token (Reihenfolge egal)
     name_parts = []
     spieler_namen = []
-    flag_namen = []
+    flavour_namen = []
     in_name = True
     for token in args:
-        # Flags erkennen: -- oder Signal-Autokorrektur — oder –
+        # Flavours erkennen: -- oder Signal-Autokorrektur — oder –
         stripped = token.lstrip("-–—")
         if stripped != token and stripped:
             in_name = False
-            flag_namen.append(stripped.replace("-", "_"))
+            flavour_namen.append(stripped.replace("-", "_"))
         elif token.startswith("@"):
             in_name = False
             spieler_namen.append(token.lstrip("@"))
@@ -412,12 +432,9 @@ def cmd_new(args: list, reply_to: str, **_) -> str:
             spieler_namen.append(token)
 
     if not name_parts:
-        return "Usage: !new <adventure-name> [@Player1 ...] [--flag1 --flag2 ...]"
+        return "Usage: !new <adventure-name> [@Player1 ...] [--flavour1 --flavour2 ...]"
 
-    # booktok requires mature — auto-enable if missing
-    if "booktok" in flag_namen and "mature" not in flag_namen:
-        flag_namen.append("mature")
-        logger.info("booktok flag gesetzt — mature automatisch aktiviert")
+    flavour_namen = _resolve_flavour_dependencies(flavour_namen)
 
     name = " ".join(name_parts).strip('"\'„"')
     ordner = name.lower().replace(" ", "_")
@@ -435,15 +452,15 @@ def cmd_new(args: list, reply_to: str, **_) -> str:
         for f in ["session.yaml", "setting.yaml", "npcs.yaml"]:
             (adventure_path / f).write_text("")
 
-    # Flags in setting.yaml schreiben
-    if flag_namen:
+    # Flavours in setting.yaml schreiben
+    if flavour_namen:
         setting_path = adventure_path / "setting.yaml"
         setting = yaml.safe_load(setting_path.read_text()) or {} if setting_path.exists() else {}
-        flags = setting.setdefault("flags", {})
-        for flag in flag_namen:
-            flags[flag] = True
+        flavours = setting.setdefault("flavours", {})
+        for flavour in flavour_namen:
+            flavours[flavour] = True
         setting_path.write_text(yaml.dump(setting, allow_unicode=True, default_flow_style=False))
-        logger.info(f"[{ordner}] Flags gesetzt: {flag_namen}")
+        logger.info(f"[{ordner}] Flavours gesetzt: {flavour_namen}")
 
     # Spieler-Telefonnummern auflösen
     not_found = []
@@ -648,7 +665,10 @@ def cmd_help(sender: str, **_) -> str:
         "!status — current adventure state (in group) or list your adventures (in DM)",
         "!status <name> — adventure details by name (in DM)",
         "!charakter — show your character sheet",
-        "!avatar — show / regenerate your portrait",
+        "!avatar — show your portrait + current prompt",
+        "!avatar regen — regenerate portrait with current prompt",
+        "!avatar prompt — show the image generation prompt",
+        "!avatar prompt <text> — update prompt and regenerate",
         "!bugreport <text> — report a bug",
         "!help — this help",
     ]
@@ -658,7 +678,7 @@ def cmd_help(sender: str, **_) -> str:
             "",
             "**Admin:**",
             "!save — save game & end session",
-            "!new <name> [@Player ...] [--flag ...] — create new adventure",
+            "!new <name> [@Player ...] [--flavour ...] — create new adventure",
             "!session0 — start Session 0",
             "!dm @Player [text] — secret 1:1 message to a player",
             "!invite +43... Name — register new player",
@@ -671,19 +691,36 @@ def cmd_help(sender: str, **_) -> str:
 
 
 def cmd_avatar(sender: str, args: list, players: dict, adventure_folder: str, reply_to: str, **_) -> None:
-    """Im Gruppenchat: direkt den eigenen Charakter generieren/anzeigen."""
-    if args:
-        char_name = " ".join(args)
-    else:
-        # Eigenen Charakter im Abenteuer ermitteln
-        player_name = signal_client.get_sender_name(sender, players)
-        char = session_manager.get_character_for_player(adventure_folder, player_name)
-        char_name = char.get("charakter", {}).get("name") if char else None
-        if not char_name:
-            signal_client.send(reply_to, f"❌ Kein Charakter für {player_name} in diesem Abenteuer gefunden.")
-            return None
+    """
+    !avatar                       — show own avatar + prompt
+    !avatar regen                 — regenerate with existing prompt
+    !avatar prompt                — show current prompt
+    !avatar prompt <text>         — update prompt and regenerate
+    """
+    player_name = signal_client.get_sender_name(sender, players)
+    char = session_manager.get_character_for_player(adventure_folder, player_name)
+    char_name = char.get("charakter", {}).get("name") if char else None
+    if not char_name:
+        signal_client.send(reply_to, f"❌ Kein Charakter für {player_name} in diesem Abenteuer gefunden.")
+        return None
 
-    generate_avatar.generate_and_send_avatars(adventure_folder, reply_to, char_name)
+    subcommand = None
+    new_prompt = None
+    if args:
+        first = args[0].lower()
+        if first in ("regen", "prompt"):
+            subcommand = first
+            rest = args[1:]
+            if rest:
+                new_prompt = " ".join(rest)
+        # any other args: ignore (no positional char-name lookup needed)
+
+    generate_avatar.generate_and_send_avatars(
+        adventure_folder, reply_to,
+        char_name=char_name,
+        subcommand=subcommand,
+        new_prompt=new_prompt,
+    )
     return None
 
 
@@ -754,7 +791,7 @@ def _send_charakter(entry: dict, reply_to: str) -> None:
 
 
 def cmd_charakter(sender: str, args: list, players: dict, reply_to: str,
-                   adventure_folder: str | None = None, **_) -> None:
+                   adventure_folder: str | None = None, group_id: str | None = None, **_) -> None:
     """
     Im Gruppenchat: Charakter des Spielers für dieses Abenteuer anzeigen.
     Im 1:1 Chat:    Alle Charaktere des Spielers durchsuchen.
@@ -762,7 +799,7 @@ def cmd_charakter(sender: str, args: list, players: dict, reply_to: str,
     player_name = signal_client.get_sender_name(sender, players)
 
     # Gruppenchat → nur dieses Abenteuer
-    if adventure_folder:
+    if group_id and adventure_folder:
         char = session_manager.get_character_for_player(adventure_folder, player_name)
         if not char:
             signal_client.send(reply_to, f"❌ Kein Charakter für {player_name} in diesem Abenteuer gefunden.")
@@ -821,9 +858,11 @@ COMMANDS = {
     "!showme":     cmd_showme,
     "!bugreport":  cmd_bugreport,
 }
-
 # !status needs adventure only in group context — handled inside the function
 NEEDS_ADVENTURE = {"!save", "!session0", "!avatar", "!showme"}
+# Kommandos die jeder registrierte Spieler nutzen kann
+PLAYER_COMMANDS = {"!help", "!charakter", "!avatar", "!status", "!bugreport", "!showme"}
+
 
 
 def handle_command(text: str, sender: str, adventure_folder: str | None,
@@ -866,22 +905,22 @@ def _handle_setup_message(adventure_folder: str, player_name: str, text: str, re
     try:
         time.sleep(RESPONSE_DELAY_SECONDS)
         dm_reply = dm_engine.respond_setup(adventure_folder, player_name, text)
-        signal_client.send(reply_to, dm_reply)
+
+        setup_complete = _SETUP_COMPLETE_MARKER in dm_reply
+        dm_reply_clean = dm_reply.replace(_SETUP_COMPLETE_MARKER, "").strip()
+        signal_client.send(reply_to, dm_reply_clean)
 
         # Charakter aus History extrahieren und speichern
         char_data = dm_engine.extract_character_from_setup_history(adventure_folder, player_name)
         if char_data.get("name"):
             session_manager.save_character(adventure_folder, player_name, char_data)
 
-        # Prüfen ob der DM "ready" signalisiert hat (einfache Heuristik: "bereit" im Reply)
-        if "bereit" in dm_reply.lower() and char_data.get("name"):
+        if setup_complete and char_data.get("name"):
             session_manager.set_player_setup_status(adventure_folder, player_name, "ready")
             logger.info(f"[{adventure_folder}] {player_name} Setup abgeschlossen")
-            # Avatar generieren
             avatar_path = generate_avatar.generate_avatar(adventure_folder, char_data["name"])
             if avatar_path:
                 signal_client.send_file(reply_to, str(avatar_path), f"🎭 {char_data['name']}")
-            # Wenn alle Spieler ready → Gruppe benachrichtigen
             if session_manager.all_players_ready(adventure_folder):
                 _notify_group_all_ready(adventure_folder)
 
@@ -931,6 +970,7 @@ def process_message(msg: dict, players: dict, registered_groups: set):
         return
 
     # Privaten Setup-Kanal prüfen (vor allem anderen — eindeutige Zuordnung per Gruppen-ID)
+    setup_ctx = None
     if group_id:
         setup_ctx = session_manager.get_setup_context_for_group(group_id)
         if setup_ctx:
@@ -941,10 +981,13 @@ def process_message(msg: dict, players: dict, registered_groups: set):
                     _handle_setup_message(adventure_folder, player_name, text, group_id)
                 else:
                     logger.warning(f"Rate limit für {sender_name} im Setup — ignoriert")
-            return  # Setup-Kanal: keine Kommandos, kein Batching
+                return  # Spielnachrichten im Setup: kein Batching
 
     # Abenteuer und Reply-Ziel bestimmen
-    if group_id:
+    if setup_ctx:
+        # adventure_folder already resolved above; reply goes to the setup group
+        reply_to = group_id
+    elif group_id:
         if group_id not in registered_groups:
             logger.debug(f"Gruppe {group_id} nicht registriert — ignoriert")
             return

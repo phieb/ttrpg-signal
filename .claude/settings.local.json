@@ -4,7 +4,15 @@
       "Bash(git -C /mnt/coding/ttrpg-signal log --oneline -10)",
       "Bash(git push *)",
       "Bash(git commit -m ' *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(py -3 -c \"import ast; ast.parse\\(open\\('bot/main.py'\\).read\\(\\)\\); ast.parse\\(open\\('bot/generate_avatar.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python3 *)",
+      "Bash(mkdir -p /mnt/coding/ttrpg-adult/flavours)",
+      "Bash(cp -r /mnt/coding/ttrpg/_engine/flavours/mature /mnt/coding/ttrpg-adult/flavours/)",
+      "Bash(cp -r /mnt/coding/ttrpg/_engine/flavours/booktok /mnt/coding/ttrpg-adult/flavours/)",
+      "Bash(gh auth *)",
+      "Bash(gh api *)",
+      "Bash(gh repo *)"
     ]
   }
 }

@@ -9,7 +9,8 @@ Signal-Bot der als Dungeon Master via Claude API antwortet. Spieler schreiben in
 
 - **signal-cli** (`bbernhard/signal-cli-rest-api`) — Signal Protokoll
 - **Python 3.11** — Bot-Service
-- **Claude API** (`claude-haiku-4-5`) — DM-Logik mit Prompt Caching
+- **DM AI** — konfigurierbar: OpenAI GPT-4o, Claude Sonnet, oder Gemini (siehe `DM_PROVIDER`)
+- **Claude Haiku** — Hilfsaufgaben (Charakter-Extraktion, Session-Komprimierung)
 - **Vertex AI Imagen 4** — Charakter-Portrait-Generierung
 - **Docker** — containerisiert
 
@@ -48,7 +49,17 @@ cp .env.example .env
 ```
 
 ```env
-ANTHROPIC_API_KEY=sk-ant-...
+# DM Provider: openai | anthropic | gemini
+DM_PROVIDER=openai
+OPENAI_API_KEY=sk-...           # für DM_PROVIDER=openai
+ANTHROPIC_API_KEY=sk-ant-...   # immer benötigt (Charakter-Extraktion, Komprimierung)
+# GEMINI_API_KEY=...            # für DM_PROVIDER=gemini
+
+# Optionale Modell-Overrides (Defaults siehe config.py)
+# OPENAI_DM_MODEL=gpt-4o
+# ANTHROPIC_DM_MODEL=claude-sonnet-4-6
+# GEMINI_DM_MODEL=gemini-2.0-flash
+
 SIGNAL_PHONE_NUMBER=+43...      # Bot-Nummer (linked device)
 ADMIN_PHONE_NUMBER=+43...       # Wer !kommandos schicken darf
 TTRPG_PATH=/pfad/zu/ttrpg      # Wo das ttrpg-Repo liegt (lokal oder NFS-Mount)
@@ -153,16 +164,22 @@ Der Bot finalisiert Session 0 automatisch sobald alle Charakterblätter vollstä
 
 ## Kommandos
 
-### All players (1:1 or group)
+### All players (group, private setup channel, or 1:1)
+
+Commands work in all three contexts: the adventure group, the private 1:1 setup channel, and direct messages.
 
 | Command | Description |
 |---------|-------------|
 | `!help` | Show available commands |
 | `!status` | In group: current adventure state. In DM: list your adventures |
 | `!status <name>` | In DM: details of a named adventure (own adventures only) |
-| `!charakter` | Show your character sheet + PDF (in group: character for this adventure) |
+| `!charakter` | Show your character sheet + PDF |
 | `!charakter <name>` | Find a specific character by name |
-| `!avatar` | Show / regenerate your portrait |
+| `!avatar` | Show your current portrait and prompt |
+| `!avatar regen` | Regenerate portrait with the existing prompt |
+| `!avatar prompt` | Show the current image generation prompt |
+| `!avatar prompt <text>` | Update the prompt and regenerate portrait |
+| `!bugreport <text>` | Report a bug |
 
 ### Admin only
 
@@ -175,7 +192,7 @@ Der Bot finalisiert Session 0 automatisch sobald alle Charakterblätter vollstä
 | `!dm @Player <text>` | Secret 1:1 message to a player |
 | `!players` | List all registered players with number and role |
 | `!showme [idea]` | Generate and send an atmospheric scene image — optional idea as inspiration |
-| `!usage` | API usage & estimated costs (Anthropic + Vertex AI) |
+| `!usage` | API usage & estimated costs (all providers + Vertex AI) |
 
 ---
 
@@ -190,17 +207,20 @@ ttrpg-signal/                  ← dieses Repo (Bot-Code)
 └── bot/
     ├── main.py                ← Event Loop, Kommando-Router
     ├── signal_client.py       ← signal-cli REST API Wrapper
-    ├── dm_engine.py           ← Claude API, History, Log, Komprimierung
+    ├── dm_engine.py           ← DM-Logik, History, Log, Komprimierung
+    ├── llm_client.py          ← AI-Provider-Adapter (OpenAI / Anthropic / Gemini)
     ├── session_manager.py     ← YAML lesen/schreiben, Kontext-Builder
-    ├── generate_avatar.py     ← Vertex AI Imagen
-    └── config.py
+    ├── generate_avatar.py     ← Vertex AI Imagen, Prompt-Verwaltung
+    ├── usage_tracker.py       ← Token- und Kosten-Tracking
+    └── config.py              ← alle Env-Variablen
 
 ttrpg/                         ← separates Repo, eingebunden via TTRPG_PATH
 ├── status.yaml                ← Abenteuer-Übersicht + Signal-Gruppen
 ├── status.example.yaml        ← Vorlage
 ├── players/                   ← ein YAML pro Spieler (Telefonnummer etc.)
 ├── _engine/
-│   ├── DUNGEON_MASTER.md      ← System-Prompt für Claude
+│   ├── DUNGEON_MASTER.md      ← DM System-Prompt
+│   ├── CHARACTER_SETUP.md     ← privater Setup-Kanal Prompt
 │   └── templates/             ← YAML-Vorlagen für neue Abenteuer
 └── adventures/
     └── mein-abenteuer/
@@ -210,7 +230,8 @@ ttrpg/                         ← separates Repo, eingebunden via TTRPG_PATH
         ├── spielprotokoll.jsonl   ← Crash-sicheres Log (wird bei !save geleert)
         └── characters/
             ├── held.yaml
-            └── held_avatar.png
+            ├── held_avatar.png
+            └── held_avatar.txt    ← Imagen-Prompt (optional, überschreibt YAML-Feld)
 ```
 
 ---

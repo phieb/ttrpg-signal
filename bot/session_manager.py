@@ -61,7 +61,7 @@ def _set_nested(data: dict, path: str, value) -> None:
 
 def _get_from_extraction(char_data: dict, path: str):
     """
-    Look up a flag field value from an extraction result.
+    Look up a flavour field value from an extraction result.
     Tries the full dot-path first, then falls back to the flat key (last component).
     """
     val = _get_nested(char_data, path)
@@ -349,12 +349,12 @@ def check_character_completeness(adventure_folder: str, player_names: list[str])
     Spieler ohne YAML bekommen "Charakterblatt fehlt komplett".
     Pflichtfelder = Basis-Felder + required-Felder aus aktiven Flag-CHARACTER_FIELDS.yaml.
     """
-    flag_fields = load_character_fields(adventure_folder)
-    required_flag_fields = [
+    flavour_fields = load_character_fields(adventure_folder)
+    required_flavour_fields = [
         (f["key"], f["key"].split(".")[-1].replace("_", " ").title())
-        for f in flag_fields if f.get("required")
+        for f in flavour_fields if f.get("required")
     ]
-    all_required = list(REQUIRED_CHAR_FIELDS) + required_flag_fields
+    all_required = list(REQUIRED_CHAR_FIELDS) + required_flavour_fields
 
     chars_by_player = {}
     for char in load_characters(adventure_folder):
@@ -386,31 +386,31 @@ def load_setting(adventure_folder: str) -> dict:
     return _load_yaml(TTRPG / "adventures" / adventure_folder / "setting.yaml")
 
 
-def load_flags(adventure_folder: str) -> dict:
-    """Gibt das flags-Dict aus setting.yaml zurück (leer falls keine gesetzt)."""
-    return load_setting(adventure_folder).get("flags", {})
+def load_flavours(adventure_folder: str) -> dict:
+    """Gibt das flavours-Dict aus setting.yaml zurück (leer falls keine gesetzt)."""
+    return load_setting(adventure_folder).get("flavours", {})
 
 
 def load_character_fields(adventure_folder: str) -> list[dict]:
     """
-    Loads flag-specific character field definitions for an adventure.
-    Each active flag may have a CHARACTER_FIELDS.yaml in its flag folder.
+    Loads flavour-specific character field definitions for an adventure.
+    Each active flavour may have a CHARACTER_FIELDS.yaml in its flavour folder.
     Returns a merged list of field dicts: [{key, required, detail}, ...]
     """
-    flags = load_flags(adventure_folder)
-    flags_dir = TTRPG / "_engine" / "flags"
+    flavours = load_flavours(adventure_folder)
+    flavours_dir = TTRPG / "_engine" / "flavours"
     fields = []
-    for flag, enabled in flags.items():
+    for flavour, enabled in flavours.items():
         if not enabled:
             continue
-        fields_path = flags_dir / flag / "CHARACTER_FIELDS.yaml"
+        fields_path = flavours_dir / flavour / "CHARACTER_FIELDS.yaml"
         if not fields_path.exists():
             continue
         try:
             data = yaml.safe_load(fields_path.read_text()) or {}
             fields.extend(data.get("fields", []))
         except Exception as e:
-            logger.warning(f"CHARACTER_FIELDS.yaml für Flag '{flag}' konnte nicht geladen werden: {e}")
+            logger.warning(f"CHARACTER_FIELDS.yaml für Flavour '{flavour}' konnte nicht geladen werden: {e}")
     # Deduplicate by key (first occurrence wins)
     seen = set()
     deduped = []
@@ -462,8 +462,8 @@ def build_context(adventure_folder: str) -> str:
     # Charaktere (details)
     if characters:
         lines.append("\n## Charaktere")
-        flag_fields = load_character_fields(adventure_folder)
-        # Paths already shown in the base block — skip in the flag-fields loop
+        flavour_fields = load_character_fields(adventure_folder)
+        # Paths already shown in the base block — skip in the flavour-fields loop
         base_shown = {
             "identitaet.wer_bist_du", "identitaet.aussehen", "identitaet.alter",
             "skills", "motivation.will", "motivation.fuerchtet", "motivation.geheimnis",
@@ -512,8 +512,8 @@ def build_context(adventure_folder: str) -> str:
             if wishes:
                 lines.append("✨ Wishes: " + (", ".join(wishes) if isinstance(wishes, list) else wishes))
 
-            # Flag-specific fields — skip anything already shown in the base block
-            for field_def in flag_fields:
+            # Flavour-specific fields — skip anything already shown in the base block
+            for field_def in flavour_fields:
                 key = field_def["key"]
                 if key in base_shown or any(key.startswith(p + ".") for p in base_shown):
                     continue

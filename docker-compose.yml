@@ -1,0 +1,30 @@
+services:
+  ttrpg-bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # Core game data (engine, adventures, players)
+      - ${TTRPG_PATH}:/mnt/ttrpg
+
+      # ── Addons ─────────────────────────────────────────────────────────────
+      # Each line mounts one flavour folder from an addon repo into the engine.
+      # Remove or comment out any addon you don't want active.
+      #
+      # Example — ttrpg-adult addon (mature + booktok flavours):
+      # - /path/to/ttrpg-adult/flavours/mature:/mnt/ttrpg/_engine/flavours/mature
+      # - /path/to/ttrpg-adult/flavours/booktok:/mnt/ttrpg/_engine/flavours/booktok
+
+    depends_on:
+      - signal-cli
+
+  signal-cli:
+    image: bbernhard/signal-cli-rest-api:latest
+    restart: unless-stopped
+    environment:
+      - MODE=native
+    volumes:
+      - signal-cli-data:/home/.local/share/signal-cli
+
+volumes:
+  signal-cli-data:

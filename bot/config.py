@@ -3,8 +3,21 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Claude API
+# ── AI Provider ───────────────────────────────────────────────────────────────
+# DM_PROVIDER: "openai" | "anthropic" | "gemini"
+DM_PROVIDER = os.getenv("DM_PROVIDER", "openai")
+
+# Claude API (used for character extraction / compression regardless of DM_PROVIDER)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_DM_MODEL = os.getenv("ANTHROPIC_DM_MODEL", "claude-sonnet-4-6")
+
+# OpenAI
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_DM_MODEL = os.getenv("OPENAI_DM_MODEL", "gpt-4o")
+
+# Gemini (via google-generativeai)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_DM_MODEL = os.getenv("GEMINI_DM_MODEL", "gemini-2.0-flash")
 
 # Google Vertex AI (Imagen)
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
