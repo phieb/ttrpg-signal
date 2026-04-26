@@ -2,8 +2,8 @@
 
 Signal-Bot der als Dungeon Master via Claude API antwortet. Spieler schreiben in eine Signal-Gruppe (oder 1:1), der Bot antwortet als DM.
 
-> **Spielwelt-Daten:** Engine, Templates und Abenteuer-Struktur liegen in einem separaten Repo:
-> [phieb/ttrpg](https://github.com/phieb/ttrpg) — wird über `TTRPG_PATH` eingebunden (z.B. als NFS-Mount oder lokaler Ordner).
+> **Spielwelt-Daten:** Engine, Templates und Abenteuer-Struktur kommen aus [phieb/ttrpg](https://github.com/phieb/ttrpg) —
+> wird beim ersten `docker compose up` automatisch geklont.
 
 ## Stack
 
