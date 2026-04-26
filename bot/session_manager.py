@@ -139,6 +139,8 @@ def _load_players() -> dict:
     """Gibt name→telefon dict aus players/*.yaml zurück."""
     players = {}
     for f in (TTRPG / "players").glob("*.yaml"):
+        if f.stem == "example":
+            continue
         try:
             data = yaml.safe_load(f.read_text()) or {}
             s = data.get("spieler", {})
@@ -239,6 +241,8 @@ def get_adventure_player_names_proper(adventure_folder: str) -> list[str]:
 
     proper: dict[str, str] = {}
     for f in (TTRPG / "players").glob("*.yaml"):
+        if f.stem == "example":
+            continue
         try:
             data = yaml.safe_load(f.read_text()) or {}
             n = data.get("spieler", {}).get("name", "")

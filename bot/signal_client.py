@@ -40,6 +40,8 @@ def load_players() -> dict:
     players = {}
     players_dir = Path(TTRPG_PATH) / "players"
     for f in players_dir.glob("*.yaml"):
+        if f.stem == "example":
+            continue
         try:
             data = yaml.safe_load(f.read_text())
             telefon = data["spieler"]["telefon"]
