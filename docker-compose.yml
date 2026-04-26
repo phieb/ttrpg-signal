@@ -1,11 +1,11 @@
 services:
 
-  # Clones the ttrpg engine repo into a named volume on first start.
+  # Clones the ttrpg engine repo into ./ttrpg on first start.
   # On subsequent starts it's a no-op (already cloned).
   ttrpg-init:
     image: alpine/git
     volumes:
-      - ttrpg-data:/mnt/ttrpg
+      - ./ttrpg:/mnt/ttrpg
     command: >
       sh -c "
         [ -d /mnt/ttrpg/.git ] || git clone https://github.com/phieb/ttrpg.git /mnt/ttrpg &&
@@ -25,7 +25,8 @@ services:
       signal-cli:
         condition: service_started
     volumes:
-      - ttrpg-data:/mnt/ttrpg
+      - ./ttrpg:/mnt/ttrpg
+      # !! Set this to the path of your GCP service account key file !!
       - ./gcp-sa.json:/app/gcp-sa.json:ro
 
       # ── Addons ───────────────────────────────────────────────────────────────
@@ -44,8 +45,4 @@ services:
     ports:
       - "8085:8080"
     volumes:
-      - signal-cli-data:/home/.local/share/signal-cli
-
-volumes:
-  ttrpg-data:
-  signal-cli-data:
+      - ./signal-cli:/home/.local/share/signal-cli

@@ -8,3 +8,4 @@ __pycache__/
 .venv/
 .nfs*
 TODO.local.md
+.claude/settings.local.json
