@@ -1,30 +1,48 @@
 services:
+
+  # Clones the ttrpg engine repo into a named volume on first start.
+  # On subsequent starts it's a no-op (already cloned).
+  ttrpg-init:
+    image: alpine/git
+    volumes:
+      - ttrpg-data:/mnt/ttrpg
+    command: >
+      sh -c "[ -d /mnt/ttrpg/.git ] || git clone https://github.com/phieb/ttrpg.git /mnt/ttrpg"
+
   ttrpg-bot:
     build: .
     restart: unless-stopped
     env_file: .env
+    environment:
+      - TTRPG_PATH=/mnt/ttrpg
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-sa.json
+    depends_on:
+      ttrpg-init:
+        condition: service_completed_successfully
+      signal-cli:
+        condition: service_started
     volumes:
-      # Core game data (engine, adventures, players)
-      - ${TTRPG_PATH}:/mnt/ttrpg
+      - ttrpg-data:/mnt/ttrpg
+      - ./gcp-sa.json:/app/gcp-sa.json:ro
 
-      # ── Addons ─────────────────────────────────────────────────────────────
-      # Each line mounts one flavour folder from an addon repo into the engine.
-      # Remove or comment out any addon you don't want active.
+      # ── Addons ───────────────────────────────────────────────────────────────
+      # Mount flavour folders from addon repos into the engine.
+      # Each flavour gets its own line. Clone the addon repo first, then uncomment.
       #
-      # Example — ttrpg-adult addon (mature + booktok flavours):
+      # Example — ttrpg-adult (mature + booktok flavours):
       # - /path/to/ttrpg-adult/flavours/mature:/mnt/ttrpg/_engine/flavours/mature
       # - /path/to/ttrpg-adult/flavours/booktok:/mnt/ttrpg/_engine/flavours/booktok
-
-    depends_on:
-      - signal-cli
 
   signal-cli:
     image: bbernhard/signal-cli-rest-api:latest
     restart: unless-stopped
     environment:
       - MODE=native
+    ports:
+      - "8085:8080"
     volumes:
       - signal-cli-data:/home/.local/share/signal-cli
 
 volumes:
+  ttrpg-data:
   signal-cli-data:

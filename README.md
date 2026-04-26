@@ -18,14 +18,14 @@ Signal-Bot der als Dungeon Master via Claude API antwortet. Spieler schreiben in
 
 ## Setup
 
-### 1. Repos klonen
+### 1. Repo klonen
 
 ```bash
 git clone https://github.com/phieb/ttrpg-signal.git
-git clone https://github.com/phieb/ttrpg.git
+cd ttrpg-signal
 ```
 
-Die `docker-compose.yml` liegt im ttrpg-signal Repo. Du kannst sie direkt dort oder in einem separaten Deployment-Ordner betreiben — passe die Pfade in `docker-compose.yml` entsprechend an.
+Das [ttrpg](https://github.com/phieb/ttrpg) Engine-Repo wird beim ersten `docker compose up` automatisch geklont — kein manueller Checkout nötig.
 
 ### 2. signal-cli starten und registrieren
 
@@ -95,17 +95,13 @@ cp /pfad/zu/ttrpg/status.example.yaml /pfad/zu/ttrpg/status.yaml
 
 Spieler werden danach per `!invite` direkt über den Bot registriert.
 
-### 6. `docker-compose.yml` anpassen
+### 6. Starten
 
-Eine fertige `docker-compose.yml` liegt im Repo. Passe die Volume-Pfade an deine lokale Umgebung an:
-
-```yaml
-volumes:
-  - /pfad/zu/ttrpg:/mnt/ttrpg
-  - ./gcp-sa.json:/app/gcp-sa.json:ro
+```bash
+docker compose up -d
 ```
 
-> `TTRPG_PATH` in der `.env` muss auf den Container-Pfad zeigen: `/mnt/ttrpg`
+Das war's. Beim ersten Start klont Docker automatisch das ttrpg Engine-Repo und startet den Bot.
 
 #### Addons einbinden
 
@@ -233,12 +229,36 @@ ttrpg/                         ← separates Repo, eingebunden via TTRPG_PATH
 
 ---
 
+## Backup
+
+Die Engine-Dateien (`_engine/`, Templates) kommen aus Git und sind jederzeit wiederherstellbar.
+Was **nicht** in Git liegt und gesichert werden sollte:
+
+| Was | Wo im `ttrpg-data` Volume |
+|-----|--------------------------|
+| Spielstände & Szenen | `adventures/*/session.yaml` |
+| Charakterblätter | `adventures/*/characters/*.yaml` |
+| Portraits & PDFs | `adventures/*/characters/*.png`, `*.pdf` |
+| Spielprotokolle | `adventures/*/spielprotokoll.jsonl` |
+| Spieler-Registry | `players/*.yaml` |
+| Abenteuer-Übersicht | `status.yaml` |
+
+Einfachstes Backup — Volume-Inhalt auf den Host kopieren:
+
+```bash
+docker run --rm \
+  -v ttrpg-signal_ttrpg-data:/source \
+  -v /pfad/zu/backup:/backup \
+  alpine tar czf /backup/ttrpg-backup-$(date +%Y%m%d).tar.gz -C /source .
+```
+
+---
+
 ## Bot neu bauen (nach Code-Änderungen)
 
 ```bash
 cd /pfad/zu/ttrpg-signal
 git pull
-cd /pfad/zu/deployment-ordner
 docker compose build ttrpg-bot
 docker compose up -d ttrpg-bot
 ```
