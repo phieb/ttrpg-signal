@@ -27,7 +27,11 @@ cd ttrpg-signal
 
 Das [ttrpg](https://github.com/phieb/ttrpg) Engine-Repo wird beim ersten `docker compose up` automatisch geklont — kein manueller Checkout nötig.
 
-### 2. `docker-compose.yml` anpassen
+### 2. `docker-compose.yml` anlegen und anpassen
+
+```bash
+cp docker-compose.example.yml docker-compose.yml
+```
 
 Signal-CLI-Daten werden als Bind Mount eingebunden — Pfad anpassen:
 
