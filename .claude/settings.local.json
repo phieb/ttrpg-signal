@@ -14,7 +14,13 @@
       "Bash(gh api *)",
       "Bash(gh repo *)",
       "Bash(git commit *)",
-      "Bash(git remote *)"
+      "Bash(git remote *)",
+      "Bash(mkdir -p /mnt/coding/ttrpg-horror/flavours/horror)",
+      "Bash(git -C /mnt/coding/ttrpg-horror init)",
+      "Bash(git -C /mnt/coding/ttrpg-horror branch -m main)",
+      "Bash(git config *)",
+      "Bash(mv /mnt/coding/ttrpg-horror /mnt/coding/ttrpg-flavour-horror)",
+      "Bash(git -C /mnt/coding/ttrpg-flavour-horror branch -m main)"
     ]
   }
 }

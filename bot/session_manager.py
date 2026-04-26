@@ -391,6 +391,11 @@ def load_flavours(adventure_folder: str) -> dict:
     return load_setting(adventure_folder).get("flavours", {})
 
 
+def load_language(adventure_folder: str) -> str:
+    """Gibt den Sprach-Code des Abenteuers zurück (Standard: 'de')."""
+    return load_setting(adventure_folder).get("language", "de")
+
+
 def load_character_fields(adventure_folder: str) -> list[dict]:
     """
     Loads flavour-specific character field definitions for an adventure.

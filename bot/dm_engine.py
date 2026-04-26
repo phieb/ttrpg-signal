@@ -29,8 +29,15 @@ _history: dict[str, list] = defaultdict(list)
 _interaction_count: dict[str, int] = defaultdict(int)
 
 
-def _load_engine_file(filename: str, fallback: str = "") -> str:
-    """Lädt eine Datei aus _engine/ mit optionalem Fallback-Text."""
+def _load_engine_file(filename: str, fallback: str = "", language: str = "") -> str:
+    """
+    Lädt eine Datei aus _engine/ mit optionalem Fallback-Text.
+    Wenn language gesetzt ist, wird zuerst _engine/{language}/{filename} versucht.
+    """
+    if language:
+        lang_path = TTRPG / "_engine" / language / filename
+        if lang_path.exists():
+            return lang_path.read_text()
     path = TTRPG / "_engine" / filename
     try:
         return path.read_text()
@@ -39,28 +46,34 @@ def _load_engine_file(filename: str, fallback: str = "") -> str:
         return fallback
 
 
-def _load_dm_prompt() -> str:
-    return _load_engine_file("DUNGEON_MASTER.md", "Du bist ein Dungeon Master. Führe die Spieler durch ein Abenteuer.")
+def _load_dm_prompt(language: str = "") -> str:
+    return _load_engine_file("DUNGEON_MASTER.md", "Du bist ein Dungeon Master. Führe die Spieler durch ein Abenteuer.", language)
 
 
-def _load_character_setup_prompt() -> str:
-    return _load_engine_file("CHARACTER_SETUP.md", "Du führst ein privates Charaktererstellungs-Gespräch.")
+def _load_character_setup_prompt(language: str = "") -> str:
+    return _load_engine_file("CHARACTER_SETUP.md", "Du führst ein privates Charaktererstellungs-Gespräch.", language)
 
 
-def _load_top_rules() -> str:
-    return _load_engine_file("TOP_DM_REGELN.md")
+def _load_top_rules(language: str = "") -> str:
+    return _load_engine_file("TOP_DM_REGELN.md", language=language)
 
 
-def _load_prompt_template(name: str) -> str:
-    """Lädt ein Prompt-Template aus _engine/templates/."""
+def _load_prompt_template(name: str, language: str = "") -> str:
+    """
+    Lädt ein Prompt-Template aus _engine/templates/.
+    Wenn language gesetzt ist, wird zuerst _engine/{language}/templates/{name} versucht.
+    """
+    if language:
+        lang_path = TTRPG / "_engine" / language / "templates" / name
+        if lang_path.exists():
+            return lang_path.read_text()
     return (TTRPG / "_engine" / "templates" / name).read_text()
 
 
-def _load_flavour_prompts(adventure_folder: str, phase: str = "DUNGEON_MASTER") -> str:
+def _load_flavour_prompts(adventure_folder: str, phase: str = "DUNGEON_MASTER", language: str = "") -> str:
     """
     Lädt alle aktiven Flavour-Prompts für die angegebene Phase.
-    Sucht in flavours/[flavour]/[phase].md — z.B. flavours/booktok/CHARACTER_SETUP.md
-    Jeder Flavour lebt in einem eigenen Unterordner.
+    Sucht zuerst flavours/[flavour]/[language]/[phase].md, dann flavours/[flavour]/[phase].md.
     """
     flavours = session_manager.load_flavours(adventure_folder)
     flavours_dir = TTRPG / "_engine" / "flavours"
@@ -68,9 +81,17 @@ def _load_flavour_prompts(adventure_folder: str, phase: str = "DUNGEON_MASTER") 
     for flavour, enabled in flavours.items():
         if not enabled:
             continue
-        prompt_path = flavours_dir / flavour / f"{phase}.md"
-        if prompt_path.exists():
-            parts.append(prompt_path.read_text())
+        path = None
+        if language:
+            lang_path = flavours_dir / flavour / language / f"{phase}.md"
+            if lang_path.exists():
+                path = lang_path
+        if path is None:
+            default_path = flavours_dir / flavour / f"{phase}.md"
+            if default_path.exists():
+                path = default_path
+        if path:
+            parts.append(path.read_text())
         else:
             logger.debug(f"Kein {phase}.md für Flavour '{flavour}' — übersprungen")
     return "\n\n".join(parts)
@@ -94,10 +115,11 @@ _SIGNAL_INSTRUCTIONS = (
 
 def _build_system(adventure_folder: str, phase: str = "DUNGEON_MASTER") -> list:
     """System-Blöcke für reguläres Spiel und Session 0 (Gruppenkanal)."""
-    dm_prompt = _load_dm_prompt()
-    flavour_prompts = _load_flavour_prompts(adventure_folder, phase=phase)
+    language = session_manager.load_language(adventure_folder)
+    dm_prompt = _load_dm_prompt(language)
+    flavour_prompts = _load_flavour_prompts(adventure_folder, phase=phase, language=language)
     context = session_manager.build_context(adventure_folder)
-    top_rules = _load_top_rules()
+    top_rules = _load_top_rules(language)
 
     cached_text = dm_prompt + _SIGNAL_INSTRUCTIONS
     if flavour_prompts:
@@ -123,8 +145,9 @@ def _build_system(adventure_folder: str, phase: str = "DUNGEON_MASTER") -> list:
 
 def _build_system_setup(adventure_folder: str, player_name: str, setting: dict) -> list:
     """System-Blöcke für den privaten CHARACTER_SETUP Kanal."""
-    setup_prompt = _load_character_setup_prompt()
-    flavour_prompts = _load_flavour_prompts(adventure_folder, phase="CHARACTER_SETUP")
+    language = setting.get("language", "de")
+    setup_prompt = _load_character_setup_prompt(language)
+    flavour_prompts = _load_flavour_prompts(adventure_folder, phase="CHARACTER_SETUP", language=language)
 
     # Kontext: Abenteuer-Setting + Spieler-Info (kein voller session-Kontext nötig)
     welt = setting.get("welt", {})
@@ -350,7 +373,8 @@ def extract_character_from_setup_history(adventure_folder: str, player_name: str
 
     flavour_additions = _flavour_field_prompt_additions(adventure_folder)
 
-    prompt = Template(_load_prompt_template("extract_character.md")).substitute(
+    language = session_manager.load_language(adventure_folder)
+    prompt = Template(_load_prompt_template("extract_character.md", language)).substitute(
         player_name=player_name,
         conversation=conversation,
         flavour_additions=flavour_additions,
@@ -441,7 +465,8 @@ def compress_session(adventure_folder: str, detailed: bool = False) -> None:
         if detailed else ""
     )
 
-    prompt = Template(_load_prompt_template("compress_session.md")).substitute(
+    language = session_manager.load_language(adventure_folder)
+    prompt = Template(_load_prompt_template("compress_session.md", language)).substitute(
         wiederaufnahme_field=wiederaufnahme_field,
         source=quelle,
     )
@@ -493,7 +518,8 @@ def extract_characters_from_history(adventure_folder: str, player_names: list[st
     players_str = ", ".join(player_names)
     flavour_additions = _flavour_field_prompt_additions(adventure_folder)
 
-    prompt = Template(_load_prompt_template("extract_characters_session0.md")).substitute(
+    language = session_manager.load_language(adventure_folder)
+    prompt = Template(_load_prompt_template("extract_characters_session0.md", language)).substitute(
         players_str=players_str,
         conversation=conversation,
         flavour_additions=flavour_additions,
