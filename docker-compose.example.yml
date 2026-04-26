@@ -14,7 +14,7 @@ services:
       "
 
   ttrpg-bot:
-    build: .
+    image: ghcr.io/phieb/ttrpg-signal:latest
     restart: unless-stopped
     env_file: .env
     environment:

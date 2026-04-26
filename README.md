@@ -18,20 +18,20 @@ Signal-Bot der als Dungeon Master via Claude API antwortet. Spieler schreiben in
 
 ## Setup
 
-### 1. Repo klonen
+### 1. Arbeitsverzeichnis anlegen
 
 ```bash
-git clone https://github.com/phieb/ttrpg-signal.git
-cd ttrpg-signal
-```
-
-Das [ttrpg](https://github.com/phieb/ttrpg) Engine-Repo wird beim ersten `docker compose up` automatisch geklont — kein manueller Checkout nötig.
-
-### 2. `docker-compose.yml` anlegen und anpassen
-
-```bash
+mkdir ttrpg-signal && cd ttrpg-signal
+curl -O https://raw.githubusercontent.com/phieb/ttrpg-signal/main/docker-compose.example.yml
+curl -O https://raw.githubusercontent.com/phieb/ttrpg-signal/main/.env.example
 cp docker-compose.example.yml docker-compose.yml
+cp .env.example .env
 ```
+
+Der Bot-Code kommt als fertiges Image von `ghcr.io/phieb/ttrpg-signal:latest` — kein Repo-Clone nötig.
+Das [ttrpg](https://github.com/phieb/ttrpg) Engine-Repo wird beim ersten `docker compose up` automatisch geklont.
+
+### 2. `docker-compose.yml` anpassen
 
 Signal-CLI-Daten werden als Bind Mount eingebunden — Pfad anpassen:
 
@@ -247,11 +247,11 @@ tar czf /pfad/zu/backup/ttrpg-backup-$(date +%Y%m%d).tar.gz -C /pfad/zu/ttrpg-si
 
 ---
 
-## Bot neu bauen (nach Code-Änderungen)
+## Bot aktualisieren
+
+GitHub Actions baut bei jedem Push auf `main` automatisch ein neues Image und pusht es nach `ghcr.io/phieb/ttrpg-signal:latest`. Update auf dem Server:
 
 ```bash
-cd /pfad/zu/ttrpg-signal
-git pull
-docker compose build ttrpg-bot
+docker compose pull ttrpg-bot
 docker compose up -d ttrpg-bot
 ```
