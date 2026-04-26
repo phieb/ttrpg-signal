@@ -85,23 +85,15 @@ gcloud iam service-accounts keys create gcp-sa.json \
 
 `gcp-sa.json` im Projektordner ablegen (in `.gitignore`, nie ins Git!).
 
-### 5. Spielwelt vorbereiten
-
-Im ttrpg-Repo `status.yaml` aus der Vorlage anlegen:
-
-```bash
-cp /pfad/zu/ttrpg/status.example.yaml /pfad/zu/ttrpg/status.yaml
-```
-
-Spieler werden danach per `!invite` direkt über den Bot registriert.
-
-### 6. Starten
+### 5. Starten
 
 ```bash
 docker compose up -d
 ```
 
-Das war's. Beim ersten Start klont Docker automatisch das ttrpg Engine-Repo und startet den Bot.
+Beim ersten Start klont Docker automatisch das ttrpg Engine-Repo und legt `status.yaml` aus der Vorlage an. Spieler danach per `!invite` direkt über den Bot registrieren.
+
+### 6. Starten
 
 #### Addons einbinden
 

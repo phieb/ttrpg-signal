@@ -7,7 +7,10 @@ services:
     volumes:
       - ttrpg-data:/mnt/ttrpg
     command: >
-      sh -c "[ -d /mnt/ttrpg/.git ] || git clone https://github.com/phieb/ttrpg.git /mnt/ttrpg"
+      sh -c "
+        [ -d /mnt/ttrpg/.git ] || git clone https://github.com/phieb/ttrpg.git /mnt/ttrpg &&
+        [ -f /mnt/ttrpg/status.yaml ] || cp /mnt/ttrpg/status.example.yaml /mnt/ttrpg/status.yaml
+      "
 
   ttrpg-bot:
     build: .
