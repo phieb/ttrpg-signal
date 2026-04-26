@@ -97,16 +97,14 @@ Beim ersten Start klont Docker automatisch das ttrpg Engine-Repo und legt `statu
 
 #### Addons einbinden
 
-Addons (z.B. [ttrpg-adult](https://github.com/phieb/ttrpg-adult)) werden als zusätzliche Volume-Mounts aktiviert — jeder Flavour des Addons bekommt eine eigene Zeile:
+Addons werden als zusätzliche Volume-Mounts aktiviert — jeder Flavour eines Addons bekommt eine eigene Zeile in `docker-compose.yml`:
 
 ```yaml
 volumes:
-  - /pfad/zu/ttrpg:/mnt/ttrpg
-  - /pfad/zu/ttrpg-adult/flavours/mature:/mnt/ttrpg/_engine/flavours/mature
-  - /pfad/zu/ttrpg-adult/flavours/booktok:/mnt/ttrpg/_engine/flavours/booktok
+  - /pfad/zu/mein-addon/flavours/mein-flavour:/mnt/ttrpg/_engine/flavours/mein-flavour
 ```
 
-Kein Code-Change nötig — der Bot erkennt neue Flavour-Ordner automatisch.
+Kein Code-Change nötig — der Bot erkennt neue Flavour-Ordner automatisch. Wie du ein eigenes Addon baust steht in `ttrpg-adult/README.md` als Referenzimplementierung (Struktur, manifest.yaml, CHARACTER_FIELDS.yaml).
 
 ### 7. Bot starten
 
