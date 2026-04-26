@@ -78,9 +78,8 @@ Eingehende Spielnachrichten werden pro Abenteuer gesammelt. Der DM antwortet ers
 ## TODOS
 
 ### Open
-- reconfigure local deployment so all game data is stored separately — advise others to do the same for easy backup
-- enable multi-language — find a fitting package, extract all prompts into language-specific files; language spec comes from ttrpg, signal is just the bot
-- think about additional flavours for the core and for public addon projects (e.g. DnD classes/creatures/spells, steampunk, post-apocalyptic, zombies, academy trope, mafia trope, good-night stories, Edgar Allan Poe, Cthulhu...) — ensure content has a compatible license; add a `!flavours` command that lists all active/available flavours with descriptions from manifest.yaml
+- enable multi-language — architecture is in place (language lookup via `_engine/{lang}/`); still needed: translated prompt files and a language field in existing adventures
+- add `!flavours` command — list all available flavours with descriptions from manifest.yaml
 
 ### Done
 - ✅ separate 18+ content into ttrpg-adult addon — mature + booktok moved out of ttrpg core; docker-compose.yml documents how to mount addons; ttrpg repo is now clean for public release (delete GitHub repo + push fresh to avoid history with mature content)
