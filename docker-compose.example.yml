@@ -20,6 +20,7 @@ services:
     environment:
       - TTRPG_PATH=/mnt/ttrpg
       - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-sa.json
+      # - LOG_LEVEL=DEBUG   # uncomment for verbose logging
     depends_on:
       ttrpg-init:
         condition: service_completed_successfully

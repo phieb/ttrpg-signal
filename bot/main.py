@@ -14,11 +14,11 @@ import usage_tracker
 from config import (
     SIGNAL_PHONE_NUMBER, ADMIN_PHONE_NUMBER, TTRPG_PATH, RESPONSE_DELAY_SECONDS,
     RATE_LIMIT_MESSAGES, RATE_LIMIT_WINDOW, BATCH_WINDOW_SECONDS,
-    RECEIVE_MODE, WEBHOOK_HOST, WEBHOOK_PORT,
+    RECEIVE_MODE, WEBHOOK_HOST, WEBHOOK_PORT, LOG_LEVEL,
 )
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )

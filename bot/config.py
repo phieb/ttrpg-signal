@@ -51,5 +51,8 @@ RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "60"))       # …pro X S
 # Nachrichten-Batching: warte X Sekunden nach der letzten Nachricht bevor der DM antwortet
 BATCH_WINDOW_SECONDS = int(os.getenv("BATCH_WINDOW_SECONDS", "60"))
 
+# Logging
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
 # Log-Rotation
 MAX_LOG_LINES = int(os.getenv("MAX_LOG_LINES", "500"))  # JSONL-Zeilen bis Rotation
