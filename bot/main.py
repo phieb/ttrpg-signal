@@ -14,6 +14,7 @@ import usage_tracker
 from config import (
     SIGNAL_PHONE_NUMBER, ADMIN_PHONE_NUMBER, TTRPG_PATH, RESPONSE_DELAY_SECONDS,
     RATE_LIMIT_MESSAGES, RATE_LIMIT_WINDOW, BATCH_WINDOW_SECONDS,
+    RECEIVE_MODE, WEBHOOK_HOST, WEBHOOK_PORT,
 )
 
 logging.basicConfig(
@@ -1047,12 +1048,8 @@ def process_message(msg: dict, players: dict, registered_groups: set):
 
 # ── Main Loop ─────────────────────────────────────────────────────────────────
 
-def main():
-    signal.signal(signal.SIGTERM, handle_signal)
-    signal.signal(signal.SIGINT, handle_signal)
-
-    logger.info("ttrpg-bot startet...")
-
+def _run_poll_loop() -> None:
+    """Klassischer Modus: Bot pollt signal-cli in einer Schleife."""
     players = signal_client.load_players()
     logger.info(f"Spieler geladen: {list(players.values())}")
 
@@ -1060,8 +1057,6 @@ def main():
     logger.info(f"Registrierte Gruppen: {registered_groups or '(noch keine)'}")
 
     while running:
-        # Gruppen + Spieler bei jedem Durchlauf neu laden — neue Abenteuer/Spieler
-        # werden sonst erst nach einem Bot-Neustart erkannt
         registered_groups = load_registered_groups()
         players = signal_client.load_players()
 
@@ -1073,6 +1068,48 @@ def main():
                 signal_client.mark_read(msg["sender"], msg["timestamp"])
         _flush_batches()
         time.sleep(POLL_INTERVAL)
+
+
+def _run_webhook_server() -> None:
+    """Webhook-Modus: externer Dispatcher (z.B. n8n) pusht Envelopes nach /receive."""
+    import threading
+    import uvicorn
+    import webhook_server
+
+    app = webhook_server.build_app(
+        process_message=process_message,
+        get_players=signal_client.load_players,
+        get_registered_groups=load_registered_groups,
+        flush_batches=_flush_batches,
+    )
+
+    stop_event = threading.Event()
+    flush_thread = threading.Thread(
+        target=webhook_server.run_flush_loop,
+        args=(_flush_batches, stop_event),
+        daemon=True,
+    )
+    flush_thread.start()
+
+    logger.info(f"Webhook-Modus aktiv — lausche auf {WEBHOOK_HOST}:{WEBHOOK_PORT}/receive")
+    config = uvicorn.Config(app, host=WEBHOOK_HOST, port=WEBHOOK_PORT, log_level="info")
+    server = uvicorn.Server(config)
+    try:
+        server.run()
+    finally:
+        stop_event.set()
+
+
+def main():
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
+
+    logger.info(f"ttrpg-bot startet (RECEIVE_MODE={RECEIVE_MODE})...")
+
+    if RECEIVE_MODE == "webhook":
+        _run_webhook_server()
+    else:
+        _run_poll_loop()
 
     _shutdown_save()
     logger.info("Bot beendet.")

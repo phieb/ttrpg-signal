@@ -29,6 +29,13 @@ SIGNAL_CLI_URL = os.getenv("SIGNAL_CLI_URL", "http://signal-cli:8080")
 SIGNAL_PHONE_NUMBER = os.getenv("SIGNAL_PHONE_NUMBER", "")
 ADMIN_PHONE_NUMBER = os.getenv("ADMIN_PHONE_NUMBER", "")  # darf !kommandos schicken
 
+# Receive mode: "poll" (default, bot pulls from signal-cli) or "webhook"
+# (external dispatcher POSTs envelopes to /receive)
+RECEIVE_MODE = os.getenv("RECEIVE_MODE", "poll").lower()
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "0.0.0.0")
+WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", "8090"))
+
 # NAS
 TTRPG_PATH = os.getenv("TTRPG_PATH", "/mnt/ttrpg")
 

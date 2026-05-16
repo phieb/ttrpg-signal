@@ -120,6 +120,56 @@ Beim ersten Start klont Docker automatisch das ttrpg Engine-Repo und legt `statu
 
 ---
 
+## Receive-Modus: Polling vs. Webhook
+
+Der Bot bietet zwei Modi, um eingehende Signal-Nachrichten zu empfangen.
+
+### Polling (Default)
+
+Standardverhalten — keine Konfiguration nötig. Der Bot ruft `signal-cli` periodisch
+über `GET /v1/receive/<number>` ab und verarbeitet neue Envelopes. Standalone deploybar,
+keine externen Abhängigkeiten.
+
+### Webhook (optional)
+
+Statt aktiv zu pollen, kann ein externer Dispatcher (z.B. n8n, ein Reverse-Proxy oder
+eine eigene Integration) eingehende Envelopes per `POST /receive` an den Bot pushen.
+Der Polling-Loop läuft in diesem Modus **nicht** — der Bot wartet ausschließlich auf
+Webhook-Aufrufe.
+
+Aktivieren:
+
+```env
+RECEIVE_MODE=webhook
+WEBHOOK_SECRET=ein_geheimes_token   # optional, aber empfohlen
+WEBHOOK_PORT=8090                   # default
+```
+
+In `docker-compose.yml` den Port veröffentlichen (oder hinter einen Reverse-Proxy stellen):
+
+```yaml
+ttrpg-bot:
+  ports:
+    - "8090:8090"
+```
+
+Der Dispatcher sendet pro eingehender Signal-Nachricht ein POST:
+
+```
+POST /receive
+Content-Type: application/json
+Authorization: Bearer <WEBHOOK_SECRET>     # oder: X-Webhook-Secret: <WEBHOOK_SECRET>
+
+<envelope-json wie von signal-cli /v1/receive zurückgegeben>
+```
+
+Der Body ist entweder ein einzelnes Envelope-Objekt oder eine Liste — beides wird akzeptiert.
+Antwort: `200 OK` bei Erfolg, `401` bei falschem Secret.
+
+Health-Check: `GET /health` → `{"status": "ok"}`.
+
+---
+
 ## Neues Abenteuer anlegen
 
 1. Spieler registrieren (einmalig pro Spieler):
